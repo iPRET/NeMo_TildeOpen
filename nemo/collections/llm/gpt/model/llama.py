@@ -81,6 +81,14 @@ class LlamaConfig(GPTConfig):
     apply_rope_fusion: bool = True
     use_transformer_engine_op_fuser: Optional[bool] = None
 
+    yarn_rotary_scaling_factor: float = 32.0
+    yarn_original_max_position_embeddings: int = 4096
+    yarn_beta_fast: float = 32.0
+    yarn_beta_slow: float = 1.0
+    yarn_correction_range_round_to_int: bool = False
+    yarn_mscale: float = 1.0
+    yarn_mscale_all_dim: float = None 
+
 
 @dataclass
 class Llama2Config7B(LlamaConfig):
@@ -769,6 +777,13 @@ class HFLlamaImporter(io.ModelConnector["LlamaForCausalLM", LlamaModel]):
             generation_config=generation_config,
             vocab_size=source.vocab_size,
             kv_channels=getattr(source, "head_dim", None),
+            position_embedding_type="yarn",
+            yarn_rotary_scaling_factor=source.rope_scaling["factor"],
+            yarn_original_max_position_embeddings=source.rope_scaling["original_max_position_embeddings"],
+            yarn_mscale=source.rope_scaling["attention_factor"],
+            yarn_correction_range_round_to_int=True,
+            yarn_beta_fast=source.rope_scaling["beta_fast"],
+            yarn_beta_slow=source.rope_scaling["beta_slow"],
             **args,
         )
 

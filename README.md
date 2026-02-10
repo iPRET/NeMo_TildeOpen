@@ -2,6 +2,8 @@
 
 This fork is intended for pruning and distilling TildeOpen30B via the code conglomeration know as the NVIDIA NeMo Framework.
 
+- This version of the NeMo repo will assume your model uses YaRN for positional embeddings when converting Llama models from Huggingface to NeMo format.
+
 # What follows is the previous README.md:
 
 [![Project Status: Active -- The project has reached a stable, usable state and is being actively developed.](http://www.repostatus.org/badges/latest/active.svg)](http://www.repostatus.org/#active)
