@@ -4,6 +4,190 @@ This fork is intended for pruning and distilling TildeOpen30B via the code congl
 
 - This version of the NeMo repo will assume your model uses YaRN for positional embeddings when converting Llama models from Huggingface to NeMo format.
 
+# Instructions
+All of the instructions are written as to be run on our local infrastructure not HPCs. As I have not yet seriously tried running this code on HPCs.
+
+## How to run this NeMo fork?
+### 1. Clone NeMo
+```
+git clone https://github.com/NVIDIA-NeMo/NeMo.git
+```
+### 2. Launch the NeMo Container
+#### On Local Infrastructure:
+```
+docker run \
+    --gpus all \
+    -it \
+    --rm \
+    --shm-size=16g \
+    --ulimit memlock=-1 \
+    --ulimit stack=67108864 \
+    -v /local_data/ingus/nemo:/local_data/ingus/nemo \
+    nvcr.io/nvidia/nemo:25.11
+```
+In docker the `-v` flag binds folders from your host system to the filesystem inside the container. That is to say, you will be able to modify the files in `-v` from inside the container. Change this flag to wherever you have your NeMo-relevant files - code, training data, checkpoints.
+
+### 3. Apply monkey patches
+Once inside the container apply the monkey patches. Assuming you're in the root of the repository run:
+```
+cd monkey_patches
+./replace.sh
+```
+After that you're all set.
+
+## How to convert a Llama Model from HuggingFace to NeMo?
+You have to create the convert script outside the NeMo repository folder, so that the container's envionment's NeMo is used for this.
+#### Create
+Create a `.py` file with contents analogous to this:
+```
+from nemo.collections import llm
+
+if __name__ == "__main__":
+  llm.import_ckpt(
+    llm.LlamaModel(
+      llm.LlamaConfig(
+        seq_length=2048,
+        num_layers=32,
+        hidden_size=4096,
+        ffn_hidden_size=11008,
+        num_attention_heads=64
+      )
+    ),
+    source="hf://./ol3b_hf_yarn_2100",
+    output_path="./ol3b_nemo_yarn_2100")
+```
+What you write inside the llm.LlamaConfig doesn't really matter. Because the config gets discarded and then later loaded from the HF checkpoint's config.json. However you are required to write something hypothetically valid in there, because it does get validated during the config object's creation.
+
+`source` is `"hf://"` + location of your HuggingFace LlamaForCausalLM checkpoint.
+
+`output_path` is folder where NeMo checkpoint will be created.
+
+#### Run
+After that, just run it:
+```
+python convert.py
+```
+
+And you're all done!
+
+### 3. Potential pitfalls:
+- The `if __name__ == "__main__":` part of the convert script is mandatory.
+
+- If you see an error like this:
+`ValueError: torch_dtype is not of type str/torch.dtype`
+You have to rename your `dtype` to `torch_dtype` in your HuggingFace model's config.json
+
+- If you applied my monkey patches, then you cannot convert models that use RoPE positional embeddings, the model has to use YaRN.
+
+# How do I get Data?
+## How do I Tokenize New Data?
+You have to run this command from inside the NeMo repo folder. So that you'd use the files from this repository not the NeMo installed in the docker container.
+```
+python scripts/nlp_language_modeling/preprocess_data_for_megatron.py \
+  --input ../eng.jsonl \
+  --output-prefix ../eng2 \
+  --json-keys text \
+  --tokenizer-library sentencepiece \
+  --tokenizer-model ../TLM/tokenizer.model \
+  --append-eod \
+  --tilde-open-eod
+```
+
+`--input` should be a classic `.jsonl` file with dicts that look like `{"text": "<sample text>"}`.
+
+`--output-prefix` is the place where *_text_document.idx and *_text_document.bin files will be placed.
+
+`--tilde-open-eod` is a flag that overrides the EOD to be 48 as in TildeOpen30B.
+
+## How do I Convert Old GPT NeoX Data to NeMo Format?
+I'll document this some other time.
+
+## Note on Shuffling NeMo Datasets.
+My understanding is that by default when running `gpt_train.py` the validation set is chosen by taking samples from the end of your provided `.idx/.bin` file, meanwhile the training data is taken from the beginning of that file. This can lead to biased validation numbers if your data was not shuffled before tokenization.
+
+# How do I Prune a Model?
+Example of command that performs pruning using 2x pipeline parallelism on Daugava using the GPUs 1 and 3:
+```
+export CUDA_VISIBLE_DEVICES=1,3
+torchrun --nproc_per_node 2 NeMo/scripts/llm/gpt_prune.py \
+  --devices 2 \
+  --tp_size 1 \
+  --pp_size 2 \
+  --seq_length 16384 \
+  --restore_path ./ol3b_nemo_yarn_2100 \
+  --save_path ./ol3b_yarn_2100_pruned_3 \
+  --data_paths ./llama_yarn_knot/knotdata_nemo \
+  --mbs 16 \
+  --num_train_samples 1024 \
+  --target_ffn_hidden_size 4096 \
+  --target_num_attention_heads 16 \
+  --target_num_query_groups 16
+```
+`--tp_size` - Tensor parallelism. It doesn't work as far as I know.
+`--restore_path` - Location of source model that you wish to prune.
+`--data_paths` - Path to NeMo `.idx/.bin` dataset.
+`--mbs` - Batch size.
+`--num_train_samples` - Number of samples, not number of batches/train steps.
+
+Note I have not tested that models with GQA. I have only tested models that have normal Multi Head Attention.
+# How do I Distill a Model?
+Example of distill command using 2x tensor parallelism on GPUs 0 and 2:
+```
+export CUDA_VISIBLE_DEVICES=0,2
+torchrun --nproc_per_node 2 NeMo/scripts/llm/gpt_train.py \
+  --devices 2 \
+  --num_nodes 1 \
+  --tp_size 2 \
+  --pp_size 1 \
+  --model_path ol3b_yarn_2100_pruned_3 \
+  --teacher_path ol3b_nemo_yarn_2100 \
+  --max_steps 30000 \
+  --warmup_steps 3000 \
+  --gbs 8 \
+  --mbs 4 \
+  --lr 1e-5 \
+  --min_lr 1e-6 \
+  --seq_length 16384 \
+  --legacy_ckpt \
+  --log_dir "ol3b_prune_logs_3" \
+  --name "OL3B_serious_prune" \
+  --log_interval 1 \
+  --val_check_interval 100 \
+  --limit_val_batches 20 \
+  --data_paths ./llama_yarn_knot/knotdata_shuffled_nemo \
+  2>&1 | tee ./ol3b_prune_logs_3.log
+```
+By default the learning schedule is a cosine learning rate schedule with an initial linear warmup.
+`--max_steps` - Number of training steps in distillation.
+`--gbs` - @Actually need to investigate what this parameter does.
+`--legacy_ckpt` - Necessary if you get errors that look like `[rank0]: RuntimeError: Missing key in checkpoint state_dict: module.decoder.final_layernorm._extra_state/shard_0_1.`
+`--limit-val-batches` - Number of batches done when validating.-
+`--log_dir` - Checkpoints, TensorBoard logs and some other extra stuff will all get saved in this folder. Multiple distillation runs are allowed to have the same `--log_dir`
+`--name` - A folder with this name will be created under `--log_dir` and all the previously mentioned stuff will be saved there.
+`2>&1 | tee ./ol3b_prune_logs_3.log` - This part is just logging everything that `gpt_train.py` prints out because this is not saved automatically anywhere.
+
+# How do You convert NeMo Llama Model to HuggingFace?
+## 1. Create Convert Script
+You have to create the convert script outside the NeMo repository folder, so that the container's envionment's NeMo is used for this.
+Create a convert `.py` script by analogy with this and run it: 
+```
+if __name__ == "__main__":
+  from nemo.collections import llm
+
+  smth = llm.export_ckpt(
+    path="/local_data/ingus/nemo/ol3b_prune_logs_2/OL3B_test_18/checkpoints/OL3B_test_18--val_loss=2.0893-epoch=0-consumed_samples=800.0-last",
+    target="hf",
+    output_path="./ol3b_prune_2",
+    overwrite=True
+  )
+```
+`--path` Path to NeMo checkpoint
+
+## 2. Adjust YaRN Settings.
+I didn't bother fixing the setting for YaRN config export in NeMo.
+So you have to manually copy in the same `rope_scaling` setting into the output model's `config.json` from the original model's `config.json`.
+
+
 # What follows is the previous README.md:
 
 [![Project Status: Active -- The project has reached a stable, usable state and is being actively developed.](http://www.repostatus.org/badges/latest/active.svg)](http://www.repostatus.org/#active)
