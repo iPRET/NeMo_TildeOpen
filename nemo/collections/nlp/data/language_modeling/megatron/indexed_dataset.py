@@ -1,3 +1,6 @@
+# Modified by Ingus:
+#   Add support for numpy arrays as input for MMapIndexedDatasetBuilder.add_item
+
 # Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -599,7 +602,10 @@ class MMapIndexedDatasetBuilder(object):
         self._doc_idx = [0]
 
     def add_item(self, tensor):
-        np_array = np.array(tensor.numpy(), dtype=self._dtype)
+        if isinstance(tensor, np.ndarray):
+          np_array = tensor.astype(self._dtype)
+        else:
+          np_array = np.array(tensor.numpy(), dtype=self._dtype)
         self._data_file.write(np_array.tobytes(order='C'))
         self._sizes.append(np_array.size)
 
