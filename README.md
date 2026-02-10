@@ -1,3 +1,9 @@
+# NeMo for purpouses of Pruning and Distilling TildeOpen.
+
+This fork is intended for pruning and distilling TildeOpen30B via the code conglomeration know as the NVIDIA NeMo Framework.
+
+# What follows is the previous README.md:
+
 [![Project Status: Active -- The project has reached a stable, usable state and is being actively developed.](http://www.repostatus.org/badges/latest/active.svg)](http://www.repostatus.org/#active)
 [![Documentation](https://readthedocs.com/projects/nvidia-nemo/badge/?version=main)](https://docs.nvidia.com/deeplearning/nemo/user-guide/docs/en/main/)
 [![CodeQL](https://github.com/nvidia/nemo/actions/workflows/codeql.yml/badge.svg?branch=main&event=push)](https://github.com/nvidia/nemo/actions/workflows/codeql.yml)
