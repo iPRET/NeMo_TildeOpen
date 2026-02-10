@@ -1,3 +1,6 @@
+# Code modified by Ingus.
+#   Added flag for eod token to be forced to 48 like in TildeOpen. Because for some reason the script failed to detect the correct EOD token.
+
 # Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -157,6 +160,8 @@ class Encoder(object):
     def initializer(self):
         # Use Encoder class as a container for global data
         Encoder.tokenizer = get_tokenizer(self.args)
+        #if self.args.tilde_open_eod:
+        #  Encoder.tokenizer.eos_id = 48
 
         if self.args.split_sentences:
             if not nltk_available:
@@ -188,7 +193,10 @@ class Encoder(object):
                     if len(sentence_ids) > 0:
                         doc_ids.append(sentence_ids)
                 if len(doc_ids) > 0 and self.args.append_eod:
-                    doc_ids[-1].append(Encoder.tokenizer.eos_id)
+                    if self.args.tilde_open_eod:
+                      doc_ids[-1].append(48)
+                    else:
+                      doc_ids[-1].append(Encoder.tokenizer.eos_id)
                 ids[key] = doc_ids
         else:
             data = json_line
@@ -202,7 +210,10 @@ class Encoder(object):
                 if len(sentence_ids) > 0:
                     doc_ids.append(sentence_ids)
             if len(doc_ids) > 0 and self.args.append_eod:
-                doc_ids[-1].append(Encoder.tokenizer.eos_id)
+                if self.args.tilde_open_eod:
+                  doc_ids[-1].append(48)
+                else:
+                  doc_ids[-1].append(Encoder.tokenizer.eos_id)
             ids['text'] = doc_ids
         return ids, len(json_line)
 
@@ -272,6 +283,7 @@ def get_args():
         help='If set, will preprocess all .json or .jsonl or json.gz or .jsonl.gz files into a single .bin and .idx file. Folder path provided via the --input arg',
     )
     group.add_argument('--apply-ftfy', action='store_true', help='If set, will apply ftfy to the input text')
+    group.add_argument('--tilde-open-eod', action='store_true', help='Overrides NeMos eod logic to just use TildeOpens EOD token (48).')
     args = parser.parse_args()
     args.keep_empty = False
 
