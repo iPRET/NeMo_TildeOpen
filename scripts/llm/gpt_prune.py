@@ -1,3 +1,5 @@
+# Changed by Ingus to hardcode "craete_attention_mask" to True.
+
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -95,6 +97,7 @@ def get_data_module(args):
         seq_length=args.seq_length,
         micro_batch_size=args.mbs,
         global_batch_size=args.mbs,  # global_batch_size is not used as there is no backward pass
+        create_attention_mask=True,
         **data_module_kwargs,
     )
 
