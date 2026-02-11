@@ -123,10 +123,15 @@ torchrun --nproc_per_node 2 NeMo/scripts/llm/gpt_prune.py \
   --target_num_attention_heads 16 \
   --target_num_query_groups 16
 ```
+
 `--tp_size` - Tensor parallelism. It doesn't work as far as I know.
+
 `--restore_path` - Location of source model that you wish to prune.
+
 `--data_paths` - Path to NeMo `.idx/.bin` dataset.
+
 `--mbs` - Batch size.
+
 `--num_train_samples` - Number of samples, not number of batches/train steps.
 
 Note I have not tested that models with GQA. I have only tested models that have normal Multi Head Attention.
@@ -159,11 +164,17 @@ torchrun --nproc_per_node 2 NeMo/scripts/llm/gpt_train.py \
 ```
 By default the learning schedule is a cosine learning rate schedule with an initial linear warmup.
 `--max_steps` - Number of training steps in distillation.
+
 `--gbs` - @Actually need to investigate what this parameter does.
+
 `--legacy_ckpt` - Necessary if you get errors that look like `[rank0]: RuntimeError: Missing key in checkpoint state_dict: module.decoder.final_layernorm._extra_state/shard_0_1.`
+
 `--limit-val-batches` - Number of batches done when validating.-
+
 `--log_dir` - Checkpoints, TensorBoard logs and some other extra stuff will all get saved in this folder. Multiple distillation runs are allowed to have the same `--log_dir`
+
 `--name` - A folder with this name will be created under `--log_dir` and all the previously mentioned stuff will be saved there.
+
 `2>&1 | tee ./ol3b_prune_logs_3.log` - This part is just logging everything that `gpt_train.py` prints out because this is not saved automatically anywhere.
 
 # How do You convert NeMo Llama Model to HuggingFace?
