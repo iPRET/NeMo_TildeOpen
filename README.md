@@ -35,6 +35,10 @@ cd monkey_patches
 ```
 After that you're all set.
 
+#### Note on masking and eod tokens.
+The `gpt_datset.py` file's loss masking and eod token index is hardcoded in the ltor function to correspond to TildeOpen30B.
+If training a different model, make sure to modify the loss masking and eod as your model expects.
+
 ## How to convert a Llama Model from HuggingFace to NeMo?
 You have to create the convert script outside the NeMo repository folder, so that the container's envionment's NeMo is used for this.
 #### Create
@@ -134,7 +138,7 @@ torchrun --nproc_per_node 2 NeMo/scripts/llm/gpt_prune.py \
 
 `--num_train_samples` - Number of samples, not number of batches/train steps.
 
-Note I have not tested that models with GQA. I have only tested models that have normal Multi Head Attention.
+Note: I have not tested that models with GQA. I have only tested models that have normal Multi Head Attention.
 # How do I Distill a Model?
 Example of distill command using 2x tensor parallelism on GPUs 0 and 2:
 ```
