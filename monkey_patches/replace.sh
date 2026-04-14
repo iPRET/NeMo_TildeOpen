@@ -19,6 +19,9 @@ cp ./dot_product_attention.py /opt/venv/lib/python3.12/site-packages/transformer
 #   so strategy.connect() doesn't clobber model.config with None.
 cp ./model_utils.py /opt/NeMo/nemo/collections/llm/modelopt/model_utils.py
 
+# Add model_config_overrides param to distill() for activation checkpointing etc.
+cp ./api.py /opt/NeMo/nemo/collections/llm/api.py
+
 # Debug prints
 #cp ./attention.py /opt/megatron-lm/megatron/core/transformer/attention.py
 

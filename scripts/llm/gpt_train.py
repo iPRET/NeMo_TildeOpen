@@ -98,6 +98,18 @@ def get_args():
     parser.add_argument("--limit_val_batches", type=int, default=32, help="Number of batches per validation stage")
     parser.add_argument("--log_interval", type=int, default=10, help="Write to log every _ steps")
     parser.add_argument("--legacy_ckpt", action="store_true", help="Load ckpt saved with TE < 1.14")
+    parser.add_argument(
+        "--recompute_granularity", type=str, default=None, choices=["selective", "full"],
+        help="Activation checkpointing granularity. 'selective' recomputes core attention only. 'full' recomputes entire layers.",
+    )
+    parser.add_argument(
+        "--recompute_method", type=str, default=None, choices=["uniform", "block"],
+        help="How to distribute recomputation across layers (only for --recompute_granularity full).",
+    )
+    parser.add_argument(
+        "--recompute_num_layers", type=int, default=None,
+        help="Number of layers per recompute chunk (only for --recompute_granularity full).",
+    )
     return parser.parse_args()
 
 
@@ -216,6 +228,15 @@ if __name__ == "__main__":
         restore_config=nl.RestoreConfig(path=args.model_path),
     )
 
+    # Activation checkpointing overrides.
+    recompute_overrides = {}
+    if args.recompute_granularity is not None:
+        recompute_overrides["recompute_granularity"] = args.recompute_granularity
+    if args.recompute_method is not None:
+        recompute_overrides["recompute_method"] = args.recompute_method
+    if args.recompute_num_layers is not None:
+        recompute_overrides["recompute_num_layers"] = args.recompute_num_layers
+
     if args.teacher_path:
         llm.distill(
             student_model_path=args.model_path,
@@ -227,6 +248,7 @@ if __name__ == "__main__":
             resume=resume,
             optim=optim,
             tokenizer=get_tokenizer(args.tokenizer) if args.tokenizer else None,
+            model_config_overrides=recompute_overrides,
         )
     else:
         llm.train(
