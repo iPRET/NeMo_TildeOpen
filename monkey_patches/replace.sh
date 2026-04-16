@@ -22,6 +22,9 @@ cp ./model_utils.py /opt/NeMo/nemo/collections/llm/modelopt/model_utils.py
 # Add model_config_overrides param to distill() for activation checkpointing etc.
 cp ./api.py /opt/NeMo/nemo/collections/llm/api.py
 
+# Reorder KD loss computation to free teacher intermediates earlier, saving ~12GB vRAM.
+cp ./loss.py /opt/NeMo/nemo/collections/llm/modelopt/distill/loss.py
+
 # Debug prints
 #cp ./attention.py /opt/megatron-lm/megatron/core/transformer/attention.py
 
