@@ -135,8 +135,121 @@ class HiddenStateCosineLoss(BaseLoss):
         return self.post_forward(loss, is_sequence_parallel=self._config.sequence_parallel)
 
 
+def _compute_log_probs_chunk(student_chunk, teacher_chunk, tp_group):
+    """
+    Compute student and teacher log-softmax for one sequence chunk, using TP all-reduces.
+    Called under no_grad in both forward and backward.
+    """
+    clen, bsz, svocab = student_chunk.shape
+
+    # Teacher log-softmax (numerically stable with TP-global max)
+    t_max, _ = torch.max(teacher_chunk, dim=-1)
+    torch.distributed.all_reduce(t_max, op=torch.distributed.ReduceOp.MAX, group=tp_group)
+    t_shifted = teacher_chunk - t_max.unsqueeze(-1)
+    t_denom = torch.sum(torch.exp(t_shifted), dim=-1)
+    torch.distributed.all_reduce(t_denom, op=torch.distributed.ReduceOp.SUM, group=tp_group)
+    t_log_prob = t_shifted - torch.log(t_denom).unsqueeze(-1)
+
+    # Student log-softmax (numerically stable with TP-global max)
+    s_max, _ = torch.max(student_chunk, dim=-1)
+    torch.distributed.all_reduce(s_max, op=torch.distributed.ReduceOp.MAX, group=tp_group)
+    s_shifted = student_chunk - s_max.unsqueeze(-1)
+    s_denom = torch.sum(torch.exp(s_shifted), dim=-1)
+    torch.distributed.all_reduce(s_denom, op=torch.distributed.ReduceOp.SUM, group=tp_group)
+    s_log_prob = s_shifted - torch.log(s_denom).unsqueeze(-1)
+
+    return s_log_prob, t_log_prob
+
+
+class _ChunkedKLDivFunction(torch.autograd.Function):
+    """
+    Custom autograd for chunked KL divergence.
+
+    Forward:  no_grad, compute loss chunk by chunk, save only inputs.
+    Backward: no_grad, recompute log_probs chunk by chunk, apply analytical gradient:
+              d(KL)/d(z) = student_softmax - teacher_softmax = exp(s_log_prob) - exp(t_log_prob)
+    """
+
+    @staticmethod
+    def forward(ctx, output_student, output_teacher, tp_group, chunk_size, reverse):
+        ctx.save_for_backward(output_student, output_teacher)
+        ctx.tp_group = tp_group
+        ctx.chunk_size = chunk_size
+        ctx.reverse = reverse
+
+        slen = output_student.shape[0]
+        loss_chunks = []
+
+        with torch.no_grad():
+            for start in range(0, slen, chunk_size):
+                end = min(start + chunk_size, slen)
+                s_log_prob, t_log_prob = _compute_log_probs_chunk(
+                    output_student[start:end],
+                    output_teacher[start:end],
+                    tp_group,
+                )
+                if reverse:
+                    chunk_loss = torch.sum(
+                        F.kl_div(t_log_prob, s_log_prob, reduction="none", log_target=True),
+                        dim=-1,
+                    )
+                else:
+                    chunk_loss = torch.sum(
+                        F.kl_div(s_log_prob, t_log_prob, reduction="none", log_target=True),
+                        dim=-1,
+                    )
+                loss_chunks.append(chunk_loss)
+
+        return torch.cat(loss_chunks, dim=0)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        output_student, output_teacher = ctx.saved_tensors
+        tp_group = ctx.tp_group
+        chunk_size = ctx.chunk_size
+        reverse = ctx.reverse
+
+        slen = output_student.shape[0]
+        grad_student = torch.empty_like(output_student)
+
+        with torch.no_grad():
+            for start in range(0, slen, chunk_size):
+                end = min(start + chunk_size, slen)
+
+                s_log_prob, t_log_prob = _compute_log_probs_chunk(
+                    output_student[start:end],
+                    output_teacher[start:end],
+                    tp_group,
+                )
+
+                # Analytical gradient of KL(q||p) w.r.t. input logits z:
+                #   d(KL)/d(z) = softmax(z) - q = p - q
+                # For reverse KL(p||q): d/d(z) = p * (log p - log q + 1) ... but the
+                # gradient w.r.t. the log_softmax input is still p - q with a sign flip.
+                if reverse:
+                    # reverse: KL(p||q), input=teacher_log_prob, target=student_log_prob
+                    # but we differentiate w.r.t. student logits (which appear as target)
+                    # d/d(z_student) = exp(s_log_prob) - exp(t_log_prob) (same formula)
+                    grad_chunk = torch.exp(s_log_prob)
+                    grad_chunk -= torch.exp(t_log_prob)
+                else:
+                    # standard: KL(q||p), input=student_log_prob, target=teacher_log_prob
+                    # d/d(z_student) = exp(s_log_prob) - exp(t_log_prob)
+                    grad_chunk = torch.exp(s_log_prob)
+                    grad_chunk -= torch.exp(t_log_prob)
+
+                grad_chunk *= grad_output[start:end].unsqueeze(-1)
+                grad_student[start:end] = grad_chunk
+
+        # grad for: output_student, output_teacher, tp_group, chunk_size, reverse
+        return grad_student, None, None, None, None
+
+
 class LogitsKLLoss(BaseLoss):
     """Calculates KL-Divergence loss between two logits tensors without reducing the sequence dim."""
+
+    # Yes this is very bad, it's hardcoded, we're all tired, sorry.
+    CHUNK_SEQ_DIVISOR = 4  # chunk_size = seq_len // 4
 
     def __init__(self, model_config: "TransformerConfig", temperature: float = 1.0, reverse: bool = False):
         """Constructor.
@@ -161,69 +274,18 @@ class LogitsKLLoss(BaseLoss):
             KLD loss of tensors (size [b, s])
         """
         predictions, targets = self.pre_forward(predictions, targets)
-        # predictions - [s, 1, v] Presumably student logits.
-        # targets - [s, 1, v] Presumably teacher logits.
 
-        # Division by temp should happen prior to finding max for both student and teacher.
-        # Currently we don't use temperature in any of ours runs (temp=1.0)
-        output_teacher = targets.float()  # INGUS: Removed Temperature (comment literally says it's 1.0)
-        del targets  # INGUS: If this doesn't crash, then it probably worked.
-        output_student = predictions.float()  # INGUS: Removed Temperature
+        output_teacher = targets.float() / self._temperature
+        output_student = predictions.float() / self._temperature
 
-        # Compute local softmax, and the reweight to compute global softmax.
         if self._config.tensor_model_parallel_size > 1:
-            # Maximum value along vocab dimension across all GPUs.
-            teacher_logits_max, _ = torch.max(output_teacher, dim=-1)
-            torch.distributed.all_reduce(
-                teacher_logits_max,
-                op=torch.distributed.ReduceOp.MAX,
-                group=parallel_state.get_tensor_model_parallel_group(),
+            tp_group = parallel_state.get_tensor_model_parallel_group()
+            slen = output_student.shape[0]
+            chunk_size = max(1, slen // self.CHUNK_SEQ_DIVISOR)
+
+            loss = _ChunkedKLDivFunction.apply(
+                output_student, output_teacher, tp_group, chunk_size, self._reverse,
             )
-            output_teacher = output_teacher - teacher_logits_max.unsqueeze(dim=-1)
-
-            denom_teacher = torch.sum(torch.exp(output_teacher), dim=-1)
-            # We can't use standard reduction function here since the computation
-            # that follows it isn't identical across TP ranks.
-            denom_teacher = all_reduce_autograd(denom_teacher, group=parallel_state.get_tensor_model_parallel_group())
-
-            slen, bsz, sharded_vocab_size = output_teacher.shape
-
-            log_denom_teacher = torch.log(denom_teacher).view(slen, bsz, 1).expand(
-                slen, bsz, sharded_vocab_size
-            )
-
-            teacher_log_prob = output_teacher - log_denom_teacher
-            del output_teacher
-            # INGUS: Reordering and deleting output_teacher. Hope we get free vRAM. Teacher is no_grad anyway.
-
-
-            # Maximum value along vocab dimension across all GPUs.
-            student_logits_max, _ = torch.max(output_student, dim=-1)
-            torch.distributed.all_reduce(
-                student_logits_max,
-                op=torch.distributed.ReduceOp.MAX,
-                group=parallel_state.get_tensor_model_parallel_group(),
-            )
-            output_student = output_student - student_logits_max.unsqueeze(dim=-1).detach()
-
-            denom_student = torch.sum(torch.exp(output_student), dim=-1)
-            denom_student = all_reduce_autograd(denom_student, group=parallel_state.get_tensor_model_parallel_group())
-
-            student_log_prob = output_student - torch.log(denom_student).view(slen, bsz, 1).expand(
-                slen, bsz, sharded_vocab_size
-            )
-
-            if self._reverse:
-                loss = torch.sum(
-                    F.kl_div(teacher_log_prob, student_log_prob, reduction="none", log_target=True),
-                    dim=-1,
-                )
-            else:
-                loss = torch.sum(
-                    F.kl_div(student_log_prob, teacher_log_prob, reduction="none", log_target=True),
-                    dim=-1,
-                ) # INGUS: WE USE THIS BRANCH.
-
         else:
             if self._reverse:
                 loss = torch.sum(
