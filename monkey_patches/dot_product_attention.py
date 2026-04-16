@@ -653,6 +653,7 @@ class DotProductAttention(TransformerEngineBaseModule):
         max_seqlen_q = sequence_length
         max_seqlen_kv = sequence_length
 
+        attention_mask = attention_mask.clone()
         attention_mask[:, :, -1] = True
         cu_seqlens_q = torch.cat([torch.tensor([0], dtype=torch.int32, device=query_layer.device),
                                  torch.nonzero(attention_mask.flatten()).squeeze(1) + 1]).to(torch.int32)
