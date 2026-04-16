@@ -275,8 +275,9 @@ class LogitsKLLoss(BaseLoss):
         """
         predictions, targets = self.pre_forward(predictions, targets)
 
-        output_teacher = targets.float() / self._temperature
-        output_student = predictions.float() / self._temperature
+        # Temperature division removed: we only use temp=1.0, and /1.0 still allocates a copy.
+        output_teacher = targets.float()
+        output_student = predictions.float()
 
         if self._config.tensor_model_parallel_size > 1:
             tp_group = parallel_state.get_tensor_model_parallel_group()
