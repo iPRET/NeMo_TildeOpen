@@ -257,7 +257,7 @@ class LogitsKLLoss(BaseLoss):
     """Calculates KL-Divergence loss between two logits tensors without reducing the sequence dim."""
 
     # Yes this is very bad, it's hardcoded, we're all tired, sorry.
-    CHUNK_SEQ_DIVISOR = 4  # chunk_size = seq_len // 4
+    CHUNK_SEQ_DIVISOR = 16  # chunk_size = seq_len // 16
 
     def __init__(self, model_config: "TransformerConfig", temperature: float = 1.0, reverse: bool = False):
         """Constructor.
