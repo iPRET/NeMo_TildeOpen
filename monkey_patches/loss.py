@@ -180,6 +180,8 @@ class _ChunkedKLDivFunction(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, output_student, output_teacher, tp_group, chunk_size, reverse):
+        # Save in original dtype (bf16) to avoid 16 GB of fp32 copies sitting in memory.
+        # Cast to fp32 per-chunk inside the loops instead.
         ctx.save_for_backward(output_student, output_teacher)
         ctx.tp_group = tp_group
         ctx.chunk_size = chunk_size
@@ -192,8 +194,8 @@ class _ChunkedKLDivFunction(torch.autograd.Function):
             for start in range(0, slen, chunk_size):
                 end = min(start + chunk_size, slen)
                 s_log_prob, t_log_prob = _compute_log_probs_chunk(
-                    output_student[start:end],
-                    output_teacher[start:end],
+                    output_student[start:end].float(),
+                    output_teacher[start:end].float(),
                     tp_group,
                 )
                 if reverse:
@@ -218,15 +220,16 @@ class _ChunkedKLDivFunction(torch.autograd.Function):
         reverse = ctx.reverse
 
         slen = output_student.shape[0]
-        grad_student = torch.empty_like(output_student)
+        # Gradient is fp32 regardless of saved tensor dtype.
+        grad_student = torch.empty(output_student.shape, dtype=torch.float32, device=output_student.device)
 
         with torch.no_grad():
             for start in range(0, slen, chunk_size):
                 end = min(start + chunk_size, slen)
 
                 s_log_prob, t_log_prob = _compute_log_probs_chunk(
-                    output_student[start:end],
-                    output_teacher[start:end],
+                    output_student[start:end].float(),
+                    output_teacher[start:end].float(),
                     tp_group,
                 )
 
@@ -283,19 +286,19 @@ class LogitsKLLoss(BaseLoss):
         """
         predictions, targets = self.pre_forward(predictions, targets)
 
-        # Temperature division removed: we only use temp=1.0, and /1.0 still allocates a copy.
-        output_teacher = targets.float()
-        output_student = predictions.float()
-
         if self._config.tensor_model_parallel_size > 1:
             tp_group = parallel_state.get_tensor_model_parallel_group()
-            slen = output_student.shape[0]
+            slen = predictions.shape[0]
             chunk_size = max(1, slen // self.CHUNK_SEQ_DIVISOR)
 
+            # Pass bf16 tensors directly — fp32 cast happens per-chunk inside the autograd
+            # function to avoid 16 GB of full-sequence fp32 copies.
             loss = _ChunkedKLDivFunction.apply(
-                output_student, output_teacher, tp_group, chunk_size, self._reverse,
+                predictions, targets, tp_group, chunk_size, self._reverse,
             )
         else:
+            output_student = predictions.float()
+            output_teacher = targets.float()
             if self._reverse:
                 loss = torch.sum(
                     F.kl_div(
