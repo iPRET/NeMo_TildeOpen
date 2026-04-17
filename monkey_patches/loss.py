@@ -146,17 +146,25 @@ def _compute_log_probs_chunk(student_chunk, teacher_chunk, tp_group):
     t_max, _ = torch.max(teacher_chunk, dim=-1)
     torch.distributed.all_reduce(t_max, op=torch.distributed.ReduceOp.MAX, group=tp_group)
     t_shifted = teacher_chunk - t_max.unsqueeze(-1)
-    t_denom = torch.sum(torch.exp(t_shifted), dim=-1)
+    del t_max
+    t_exp = torch.exp(t_shifted)
+    t_denom = torch.sum(t_exp, dim=-1)
+    del t_exp
     torch.distributed.all_reduce(t_denom, op=torch.distributed.ReduceOp.SUM, group=tp_group)
     t_log_prob = t_shifted - torch.log(t_denom).unsqueeze(-1)
+    del t_shifted, t_denom
 
     # Student log-softmax (numerically stable with TP-global max)
     s_max, _ = torch.max(student_chunk, dim=-1)
     torch.distributed.all_reduce(s_max, op=torch.distributed.ReduceOp.MAX, group=tp_group)
     s_shifted = student_chunk - s_max.unsqueeze(-1)
-    s_denom = torch.sum(torch.exp(s_shifted), dim=-1)
+    del s_max
+    s_exp = torch.exp(s_shifted)
+    s_denom = torch.sum(s_exp, dim=-1)
+    del s_exp
     torch.distributed.all_reduce(s_denom, op=torch.distributed.ReduceOp.SUM, group=tp_group)
     s_log_prob = s_shifted - torch.log(s_denom).unsqueeze(-1)
+    del s_shifted, s_denom
 
     return s_log_prob, t_log_prob
 
