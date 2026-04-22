@@ -97,6 +97,7 @@ def get_args():
     parser.add_argument("--val_check_interval", type=int, default=100, help="Validate + checkpoint every _ steps")
     parser.add_argument("--limit_val_batches", type=int, default=32, help="Number of batches per validation stage")
     parser.add_argument("--log_interval", type=int, default=10, help="Write to log every _ steps")
+    parser.add_argument("--save_top_k", type=int, default=1, help="Keep top K checkpoints by val_loss (-1 for all)")
     parser.add_argument("--legacy_ckpt", action="store_true", help="Load ckpt saved with TE < 1.14")
     parser.add_argument(
         "--recompute_granularity", type=str, default=None, choices=["selective", "full"],
@@ -210,7 +211,7 @@ if __name__ == "__main__":
     ## Set up checkpointing and logging
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
-        save_top_k=1,
+        save_top_k=args.save_top_k,
         every_n_train_steps=args.val_check_interval,
     )
     logger = nl.NeMoLogger(
