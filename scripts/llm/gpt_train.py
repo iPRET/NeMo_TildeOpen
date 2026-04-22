@@ -98,6 +98,7 @@ def get_args():
     parser.add_argument("--limit_val_batches", type=int, default=32, help="Number of batches per validation stage")
     parser.add_argument("--log_interval", type=int, default=10, help="Write to log every _ steps")
     parser.add_argument("--save_top_k", type=int, default=1, help="Keep top K checkpoints by val_loss (-1 for all)")
+    parser.add_argument("--clip_grad", type=float, default=1.0, help="Gradient clipping max norm")
     parser.add_argument("--legacy_ckpt", action="store_true", help="Load ckpt saved with TE < 1.14")
     parser.add_argument(
         "--recompute_granularity", type=str, default=None, choices=["selective", "full"],
@@ -199,6 +200,7 @@ if __name__ == "__main__":
         lr=args.lr,
         bf16=("bf16" in args.precision),
         use_distributed_optimizer=True,
+        clip_grad=args.clip_grad,
     )
     sched = CosineAnnealingScheduler(
         max_steps=args.max_steps,
