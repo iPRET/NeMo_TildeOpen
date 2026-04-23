@@ -25,6 +25,9 @@ cp ./api.py /opt/NeMo/nemo/collections/llm/api.py
 # Reorder KD loss computation to free teacher intermediates earlier, saving ~12GB vRAM.
 cp ./loss.py /opt/NeMo/nemo/collections/llm/modelopt/distill/loss.py
 
+# Free GPU cache before checkpoint save to avoid OOM.
+cp ./megatron_strategy.py /opt/NeMo/nemo/lightning/pytorch/strategies/megatron_strategy.py
+
 # Debug prints
 #cp ./attention.py /opt/megatron-lm/megatron/core/transformer/attention.py
 
