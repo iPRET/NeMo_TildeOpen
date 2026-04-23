@@ -100,6 +100,7 @@ def get_args():
     parser.add_argument("--save_top_k", type=int, default=1, help="Keep top K checkpoints by val_loss (-1 for all)")
     parser.add_argument("--clip_grad", type=float, default=1.0, help="Gradient clipping max norm")
     parser.add_argument("--legacy_ckpt", action="store_true", help="Load ckpt saved with TE < 1.14")
+    parser.add_argument("--sync_checkpoints", action="store_true", help="Disable async checkpoint saving (prevents corruption if job is killed mid-save)")
     parser.add_argument(
         "--recompute_granularity", type=str, default=None, choices=["selective", "full"],
         help="Activation checkpointing granularity. 'selective' recomputes core attention only. 'full' recomputes entire layers.",
@@ -141,6 +142,7 @@ if __name__ == "__main__":
             average_in_collective=True,
         ),
         ckpt_load_strictness=StrictHandling.LOG_ALL if args.legacy_ckpt else None,
+        ckpt_async_save=not args.sync_checkpoints,
     )
     trainer = nl.Trainer(
         devices=args.devices,
