@@ -202,6 +202,12 @@ if __name__ == "__main__":
 I didn't bother fixing the setting for YaRN config export in NeMo.
 So you have to manually copy in the same `rope_scaling` setting into the output model's `config.json` from the original model's `config.json`.
 
+### Alternatively: use `convert_tildeopen.py`
+The script `convert_tildeopen.py` in the repo root automates steps 1 and 2 — it converts and injects the YaRN config automatically. Copy it outside the repo (so the container's NeMo is used) and run:
+```
+python convert_tildeopen.py --nemo-cp /path/to/nemo/checkpoint --output /path/to/hf/output
+```
+
 
 # What follows is the previous README.md:
 
