@@ -16,15 +16,16 @@ import sys
 
 
 # TildeOpen YaRN rope_scaling config.
-# These values match the TildeOpen 30B (and pruned variants) HF config.
+# No attention_factor — HF5 interprets it literally (wrong), HF4 needs a custom loader anyway.
+# truncate: true works for both HF4 (with custom loader) and HF5.
 TILDEOPEN_ROPE_SCALING = {
-    "attention_factor": 1.0,
     "beta_fast": 32.0,
     "beta_slow": 1.0,
     "factor": 10.0,
     "original_max_position_embeddings": 8192,
     "rope_type": "yarn",
     "type": "yarn",
+    "truncate": True,
 }
 
 
