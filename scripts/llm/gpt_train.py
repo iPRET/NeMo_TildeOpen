@@ -16,6 +16,7 @@ import os
 from argparse import ArgumentParser
 
 import torch
+from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.loggers import TensorBoardLogger
 from megatron.core.dist_checkpointing.validation import StrictHandling
 from megatron.core.distributed import DistributedDataParallelConfig
@@ -99,6 +100,7 @@ def get_args():
     parser.add_argument("--log_interval", type=int, default=10, help="Write to log every _ steps")
     parser.add_argument("--save_top_k", type=int, default=1, help="Keep top K checkpoints by val_loss (-1 for all)")
     parser.add_argument("--clip_grad", type=float, default=1.0, help="Gradient clipping max norm")
+    parser.add_argument("--max_checkpoints", type=int, default=None, help="Exit gracefully after saving this many checkpoints")
     parser.add_argument("--legacy_ckpt", action="store_true", help="Load ckpt saved with TE < 1.14")
     parser.add_argument("--sync_checkpoints", action="store_true", help="Disable async checkpoint saving (prevents corruption if job is killed mid-save)")
     parser.add_argument(
@@ -127,6 +129,21 @@ def _read_chat_template(template_path: str):
 if __name__ == "__main__":
     args = get_args()
 
+    ## Set up optional callbacks
+    callbacks = []
+    if args.max_checkpoints is not None:
+        class ExitAfterNCheckpoints(Callback):
+            def __init__(self, n):
+                self.n = n
+                self.count = 0
+            def on_train_batch_end(self, trainer, *args, **kwargs):
+                if trainer.global_step > 0 and trainer.global_step % trainer.val_check_interval == 0:
+                    self.count += 1
+                    if self.count >= self.n:
+                        logging.info(f"Reached {self.n} checkpoints, stopping gracefully.")
+                        trainer.should_stop = True
+        callbacks.append(ExitAfterNCheckpoints(args.max_checkpoints))
+
     ## Initialize the strategy and trainer
     strategy = nl.MegatronStrategy(
         tensor_model_parallel_size=args.tp_size,
@@ -151,6 +168,7 @@ if __name__ == "__main__":
         log_every_n_steps=args.log_interval,
         val_check_interval=args.val_check_interval,
         limit_val_batches=args.limit_val_batches,
+        callbacks=callbacks,
         strategy=strategy,
         accelerator="gpu",
         plugins=nl.MegatronMixedPrecision(
@@ -218,6 +236,7 @@ if __name__ == "__main__":
         save_top_k=args.save_top_k,
         every_n_train_steps=args.val_check_interval,
     )
+
     logger = nl.NeMoLogger(
         name=args.name,
         log_dir=args.log_dir,
