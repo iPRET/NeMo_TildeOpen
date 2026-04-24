@@ -16,8 +16,6 @@ import sys
 
 
 # TildeOpen YaRN rope_scaling config.
-# No attention_factor — HF5 interprets it literally (wrong), HF4 needs a custom loader anyway.
-# truncate: true works for both HF4 (with custom loader) and HF5.
 TILDEOPEN_ROPE_SCALING = {
     "beta_fast": 32.0,
     "beta_slow": 1.0,
