@@ -5,6 +5,7 @@ This fork is intended for pruning and distilling TildeOpen30B via the NVIDIA NeM
 Pro tips: 
 - Whenever a comment in a code block is in all caps, that means you have to modify the code before running it.
 - Following these instructions does increase the chance you will succeed, but it's far from a guarantee of success. NeMo holds together on scotch tape and bubblegum. Also I didn't test most of these commands.
+- Vibes for choosing pruning architecture and distillation hyperparameters can be attained from the papers  [Compact Language Models via Pruning and Knowledge Distillation](https://arxiv.org/abs/2407.14679) and [LLM Pruning and Distillation in Practice](https://arxiv.org/abs/2408.11796).
 ## How to set up NeMo on Our Local Infrastructure?
 ### 1. Clone NeMo
 ```
@@ -25,6 +26,7 @@ docker run \
     nvcr.io/nvidia/nemo:25.11
 ```
 In docker the `-v` flag binds folders from your host system to the filesystem inside the container. That is to say, you will be able to modify the files in `-v` from inside the container. Change this flag to wherever you have your NeMo-relevant files - code, training data, checkpoints.
+Use the `nemo:25.11` container and ONLY 25.11. Older and newer containers have different internals that the monkey patches won't match.
 ### 3. Apply monkey patches
 Once inside the container apply the monkey patches.
 ```
@@ -66,6 +68,7 @@ singularity pull nemo_25.11.sif docker://nvcr.io/nvidia/nemo:25.11
 # Convert container to a sandboxed container.
 singularity build --sandbox nemo_sandbox/ nemo_25.11.sif
 ```
+Use the `nemo:25.11` container and ONLY 25.11. Older and newer containers have different internals that the monkey patches won't match.
 ### 4. Create bind folders
 ```
 # Create folders that you'll later bind when running the container.
@@ -114,6 +117,8 @@ singularity shell --nv -B /e:/e nemo_patched.sif
 ```
 After running this, you're inside a singularity container. You can run nemo stuff from here. To exit write `exit`.
 This might work for some data preprocessing scripts or conversion scripts.
+
+If you ever see `RuntimeError: Found no NVIDIA driver on your system` inside a container, it means you forgot the `--nv` flag.
 #### 7.2. Computationally heavy scripts
 Alternatively if the script is too heavy to run on a login node, you can run an interactive slurm job:
 ```
@@ -136,13 +141,31 @@ srun \
 ```
 #### 7.3. Parallel computational heavy stuff.
 Pruning and distillation is parallelized and requires you write sbatch scripts. Examples are shown in the pruning and distillation sections.
+### 8. Pre-download tokenizer files
+Compute nodes have no internet. NeMo's data module instantiates a gpt2 tokenizer even though it never really needs one, and tries to download it through two separate code paths. If you skip this step, pruning/distillation jobs will hang spamming `Network is unreachable ... huggingface.co` retries, or die with `ValueError: Unable to instantiate HuggingFace AUTOTOKENIZER for gpt2`. Run this once on a login node (which has internet):
+```
+# ADJUST THE PATHS TO YOUR SCRATCH FOLDER.
+# HF_HUB_CACHE MUST BE AN ABSOLUTE PATH. A relative path silently doesn't work.
+
+export HF_HUB_CACHE=/e/project1/jureap133/ingus/nemo/hf_cache
+singularity exec -B /e:/e nemo_patched.sif \
+  python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('gpt2')"
+
+# The megatron code path downloads gpt2 vocab/merges separately, into $TORCH_HOME/megatron.
+mkdir -p /e/project1/jureap133/ingus/nemo/torch_cache/megatron
+wget https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-vocab.json \
+  -O /e/project1/jureap133/ingus/nemo/torch_cache/megatron/megatron-gpt-345m_vocab
+wget https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-merges.txt \
+  -O /e/project1/jureap133/ingus/nemo/torch_cache/megatron/megatron-gpt-345m_merges
+```
+These paths have to match the `HF_HUB_CACHE` and `TORCH_HOME` exports in your innerscripts (see the pruning and distillation sections). The `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` exports there are what stops the code from trying to reach the internet in the first place.
 ## How to convert a Llama Model from HuggingFace to NeMo?
 ### Note
 This version of the NeMo repo will assume your model uses YaRN for positional embeddings when converting Llama models from Huggingface to NeMo format.
 ### 1. Move outside of the NeMo repository folder if you're in it
 You have to create the convert script outside the NeMo repository folder, so that the container's envionment's NeMo is used for this. I propose parent directory of repo root.
 ### 2. Create conversion script
-Create a python script (OUTSIDE OF REPOSITORY ROOT) with contents like this:
+Create a python script in parent directory of repo root with contents like this:
 ```
 from nemo.collections import llm
 
@@ -211,6 +234,8 @@ You have to rename your `dtype` to `torch_dtype` in your HuggingFace model's con
 
 - If you applied my monkey patches, then you cannot convert models that use RoPE positional embeddings, the model has to use YaRN.
 
+- If your HuggingFace checkpoint is in fp32, convert it to bf16 first before converting to NeMo. Otherwise you'll get cryptic CUDA asserts like `vectorized_gather_kernel ... index out of bounds`.
+
 # How do I get Data?
 ## How do I Tokenize New Data?
 You have to run this command from inside the NeMo repo folder. So that you'd use the files from this repository not the NeMo installed in the docker container.
@@ -277,6 +302,7 @@ python picklenp_2_nemo.py \
 `--output-prefix` is the file path without the .bin/.idx that NeMo adds to the end of datasets.
 ## Note on Shuffling NeMo Datasets
 When running `gpt_train.py` the validation set is chosen by taking samples from the end of your provided `.idx/.bin` file. This can lead to biased validation numbers if your data was not shuffled before tokenization. So you probably want to shuffle your data at some point.
+On the pleasant side, unlike GPT NeoX, NeMo does not resample the validation set - every validation runs on the same batches.
 ## How do I Prune a Model (Local Infrastructure)
 ```
 # COMMANDS MUST BE RUN INSIDE DOCKER CONTAINER.
@@ -312,9 +338,10 @@ torchrun --nproc_per_node 4 NeMo_TildeOpen/scripts/llm/gpt_prune.py \
 
 `--mbs` - Batch size.
 
-`--num_train_samples` - Number of samples, not number of batches/train steps.
+`--num_train_samples` - Number of samples, not number of batches/train steps. 1024 is what the Minitron paper used.
 
-`--num_layers_in_last_pipeline_stage` You can choose how many layers are in the last pipeline stage. You might have to do some poking around here because of some divisibility issues or VRAM capacity issues.
+`--num_layers_in_last_pipeline_stage` - How many layers go in the last pipeline stage. The last stage also holds the big output logits buffer, so on 96GB GPUs pruning the 30B OOMs unless the last stage gets few layers. Constraint: the remaining layers must split evenly among the remaining stages, otherwise you get `number of layers at middle stage: X must be divisible by the middle pipeline model parallel size Y`.
+WARNING: this setting gets baked into the pruned checkpoint's config, and distillation with a different pipeline layout will then crash with the same divisibility error. Fix: Ask claude code to set `num_layers_in_last_pipeline_stage` to `null` in `context/io.json` and `context/model.yml` of the pruned checkpoint.. (I don't remember this 100%, but I have a strong suspicion `io.json` is what's actually read and `model.yaml` is ignored - edit both to be safe.)
 
 `--target_ffn_hidden_size --target_hidden_size --target_num_attention_heads --target_num_query_groups --target_num_layers` These parameters decide what shape the pruned model will be. If I remember correctly, the `--target_num_query_groups` one didn't work.
 # How do I Prune a Model? (Supercomputer)
@@ -362,6 +389,8 @@ This script contains the actual pruning configuration.
 
 # ADJUST THESE TO LOCATIONS ON YOUR SCRATCH FOLDER.
 # These exports are necessary so your home folder doesn't overflow.
+# The OFFLINE=1 flags are needed because compute nodes have no internet -
+# without them jobs hang retrying huggingface.co requests. See section 7.4.
 export HF_HUB_CACHE=/e/project1/jureap133/ingus/nemo/hf_cache
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
@@ -396,9 +425,9 @@ torchrun --nproc_per_node 4 NeMo_TildeOpen/scripts/llm/gpt_prune.py \
 
 `--mbs` - Batch size.
 
-`--num_train_samples` - Number of samples, not number of batches/train steps.
+`--num_train_samples` - Number of samples, not number of batches/train steps. 1024 is what the Minitron paper used.
 
-`--num_layers_in_last_pipeline_stage` You can choose how many layers are in the last pipeline stage. You had to do some poking around here because of some divisibility issues.
+`--num_layers_in_last_pipeline_stage` - See the explanation in the (Local Infrastructure) pruning section - the VRAM reasoning, the divisibility constraint and the WARNING about it getting baked into the pruned checkpoint's `context/io.json` all apply here too.
 
 `--target_ffn_hidden_size --target_hidden_size --target_num_attention_heads --target_num_query_groups --target_num_layers` These parameters decide what shape the pruned model will be. I might be wrong but I think the `--target_num_query_groups` one didn't work.
 ## 4. Run it
@@ -499,6 +528,8 @@ export NCCL_BUFFSIZE=2097152
 
 # ADJUST THESE LOCATIONS TO YOUR SCRATCH FOLDER.
 # These exports are necessary so your home folder doesn't overflow.
+# The OFFLINE=1 flags are needed because compute nodes have no internet -
+# without them jobs hang retrying huggingface.co requests. See section 7.4.
 export HF_HUB_CACHE=/e/project1/jureap133/ingus/nemo/hf_cache
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
@@ -550,15 +581,19 @@ torchrun \
 
 `--pp_size` - Pipeline parallelism.
 
+`--cp_size` - Context parallelism. DOES NOT WORK - my monkey-patched attention uses 1D attention masks and context parallelism expects 2D ones. Leave it at 1.
+
 `--model_path` - Location where pruned but untrained NeMo checkpoint is located.
 
 `--recompute_granularity --recompute_method` - activation checkpointing settings. Leave as is.
 
-`--recompute_num_layers` - Either meant the interval of activation checkpoint, or the amount of layers that are checkpointed. Either way you might need to adjust this for divisibility.
+`--recompute_num_layers` - Either meant the interval of activation checkpoint, or the amount of layers that are checkpointed. Either way it has to divide the layer count (otherwise crashes like `IndexError: index 60 is out of range`).
 
 `--max_steps` - Number of training steps in distillation.
 
-`--gbs` - Global batch size.
+`--gbs` - Global batch size. Has to be divisible by mbs * data parallel size.
+
+`--kd_config` - Not in the command, and leave it that way. The default distills logits only, same as the Minitron paper.
 
 `--legacy_ckpt` - Magic. Necessary if you get errors that look like `[rank0]: RuntimeError: Missing key in checkpoint state_dict: module.decoder.final_layernorm._extra_state/shard_0_1.`
 
@@ -568,27 +603,34 @@ torchrun \
 
 `--limit_val_batches` - Number of batches done for validation.
 
+Sidenote on validation: it can OOM even when training itself fits, because the validation pass materializes a big fp32 logits buffer. Turning validation off entirely is a VRAM saver (this is what our Attention run did). Checkpoints from such a run are all named `val_loss=0.0000` - that means validation was off, not that the model is perfect.
+
 `--save_top_k` - If this is set to -1, then it will save all checkpoints. If it's an integer, then saves top k checkpoints by validation loss and autodeletes ones that have less. I get a feeling like this arg was buggy so I wrote a script that automatically backs up the most recent checkpoint.
 
-`--sync_checkpoints` - Flag that makes NeMo do synchronous checkpointing rather than asynchronous checkpointing. There's a tradeoff that async checkpoints had some bug I don't remember, but it was serious enough that I switched to sync checkpoints. Meanwhile sync checkpoints had a bug where they don't save model configs.
+`--sync_checkpoints` - Flag that makes NeMo do synchronous checkpointing rather than asynchronous checkpointing. With the default async checkpointing, resumed runs would restart with an exploded loss (the optimizer state gets lost/corrupted on resume), and jobs sometimes died with `ValueError: Last checkpoint is unfinished and cannot be used to resume` (if you hit that, manually delete the `*-last-unfinished`/corrupt `*-last` checkpoint folder). Sync checkpointing fixed resuming. The tradeoff: sync checkpoints don't save the model config (`context/model.yaml` and `context/io.json`) - see the conversion pitfalls section below for the fix.
 
 `--max_checkpoints` - Training exits after making this many checkpoints.
+Set `--max_checkpoints` so the training exits cleanly a bit before the walltime kills it (checkpoint count * `--val_check_interval` * seconds-per-step should stay comfortably under the job's `--time`).
+For reference, on JUPITER (256 nodes, tp 4, 64Ki tokens, gbs 256) a step took ~24s, i.e. ~660-680 tokens/s/GPU - and that was roughly flat from 8 to 256 nodes, so scaling out is fine. Also the very first job of a run spends ~25 min building dataset indexes before training starts; later jobs start in ~5-7 min.
 
 `--data_paths` - Path to training data `.idx/.bin`/.
 ## 4. Run it.
 ```
 sbatch distil_real_sbatchscript_optimal.sh
 ```
-## 5. Keep it running (job chaining)
-Supercomputers cap the walltime of a single job (on JUPITER booster we ran with 3h jobs), which is way shorter than a full distillation (~5 days). Training automatically resumes from the newest `*-last` checkpoint in `--log_dir/--name/checkpoints/`, so you just submit the same sbatch script many times as a dependency chain:
+## 5. Tips and Tricks
+### Job chaining
+Supercomputers cap the walltime of a single job (on JUPITER booster we ran with 3h jobs), which is way shorter than a full distillation run. Training automatically resumes from the `*-last` checkpoint in `--log_dir/--name/checkpoints/`, so you can just submit the same sbatch script many times as a dependency chain:
 ```
 # Each job starts only after the previous one ends (finished, timed out or crashed).
 job=$(sbatch --parsable distil_real_sbatchscript_optimal.sh)
+# ADJUST 40 TO HOW LONG YOU WANT THE CHAIN TO BE.
 for i in $(seq 1 40); do
   job=$(sbatch --parsable --dependency=afterany:$job distil_real_sbatchscript_optimal.sh)
 done
 ```
-Set `--max_checkpoints` so the training exits cleanly a bit before the walltime kills it (checkpoint count * `--val_check_interval` * seconds-per-step should stay comfortably under the job's `--time`).
+### Restarting distillation from an older checkpoint
+NeMo resumes from whatever checkpoint folder in `--log_dir/--name/checkpoints/` ends with `-last`. So to restart from an earlier checkpoint: rename the current `*-last` folder to something else, and rename your desired checkpoint's folder so it ends with `-last`. The iteration number is somehow inferred from the `-last` checkpoint.
 # How do You convert NeMo Llama Model to HuggingFace?
 ## 1. Create Convert Script
 You have to create the convert script outside the NeMo repository folder, so that the container's envionment's NeMo is used for this.
@@ -614,11 +656,17 @@ if __name__ == "__main__":
 python convert_nemo_hf.py
 ```
 ### 2.1 Possible Conversion Pitfalls
-You might run into conversion issues, because when training with synchronous checkpointing it doesn't save the model config in the checkpoints. 
-I don't remember precisely but I think to fix was to copy `model.yaml` and `io.json` from pruned student model to the analogous checkpoint location.
+- When training with synchronous checkpointing (`--sync_checkpoints`) the model config is not saved in the checkpoints. Symptom: conversion crashes with `json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)`. Fix: copy `context/model.yaml` and `context/io.json` from any early checkpoint of the same run (or from the pruned student model) into the checkpoint you're converting. (I don't remember this 100%, but I have a strong suspicion `io.json` is the file that's actually read and `model.yaml` is ignored - copy both to be safe.)
+
+- A pruned-but-untrained checkpoint won't convert at all - you get `RuntimeError: Missing key in checkpoint state_dict: ...._extra_state...`, and the export API has no `--legacy_ckpt` to bail you out. The trickery that works: "train" the pruned model for one step with zero learning rate and convert the checkpoint that produces:
+```
+--max_steps 1 --warmup_steps 1 --lr 0.0 --min_lr 0.0 --gbs 1 --mbs 1 --val_check_interval 1 --limit_val_batches 1
+```
+(i.e. run the usual distillation command with these overrides, then convert the resulting checkpoint.) You'll want this whenever you benchmark a pruned-only baseline.
 ## 3. Adjust YaRN Settings.
 I didn't bother fixing the setting for YaRN config export in NeMo.
 So you have to manually copy in the same `rope_scaling` setting into the output model's `config.json` from the original model's `config.json`.
+DO NOT SKIP THIS. The model still "works" without it, but benchmark performance silently deteriorates by ~3% (measured on ARC).
 # What follows is the previous README.md:
 
 [![Project Status: Active -- The project has reached a stable, usable state and is being actively developed.](http://www.repostatus.org/badges/latest/active.svg)](http://www.repostatus.org/#active)
