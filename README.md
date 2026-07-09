@@ -1,21 +1,19 @@
 # NeMo for purpouses of Pruning and Distilling TildeOpen.
 
-This fork is intended for pruning and distilling TildeOpen30B via the code conglomeration know as the NVIDIA NeMo Framework.
-
-- This version of the NeMo repo will assume your model uses YaRN for positional embeddings when converting Llama models from Huggingface to NeMo format.
-
+This fork is intended for pruning and distilling TildeOpen30B via the NVIDIA NeMo Framework.
 # Instructions
-Pro tip: Whenever a comment in a code block is in all caps, that means you have to modify the code before running it.
-Following these instructions does increase the chance you will succeed, but it's far from a guarantee of success. NeMo holds together on scotch tape and bubblegum. Also I didn't test most of these commands.
-## How to setup running stuff from this NeMo fork on our servers?
+Pro tips: 
+- Whenever a comment in a code block is in all caps, that means you have to modify the code before running it.
+- Following these instructions does increase the chance you will succeed, but it's far from a guarantee of success. NeMo holds together on scotch tape and bubblegum. Also I didn't test most of these commands.
+## How to set up NeMo on Our Local Infrastructure?
 ### 1. Clone NeMo
 ```
 git clone https://github.com/iPRET/NeMo_TildeOpen.git
 ```
-I'll refer to `./NeMo_TileOpen/` as the "repo root".
+In the rest of the readme I'll refer to `NeMo_TileOpen/` as the "repo root".
 ### 2. Launch the NeMo Container
 ```
-# ADJUST THIS WITH YOUR PATH
+# ADJUST BINDINGS -v TO CONTAIN YOUR NEMO REPO.
 docker run \
     --gpus all \
     -it \
@@ -28,9 +26,10 @@ docker run \
 ```
 In docker the `-v` flag binds folders from your host system to the filesystem inside the container. That is to say, you will be able to modify the files in `-v` from inside the container. Change this flag to wherever you have your NeMo-relevant files - code, training data, checkpoints.
 ### 3. Apply monkey patches
-Once inside the container apply the monkey patches. Assuming you're in the root of the repository run:
+Once inside the container apply the monkey patches.
 ```
-# ADJUST THIS WITH YOU PATH
+# ADJUST THIS WITH YOU NEMO PATH
+# RUN THIS INSIDE THE DOCKER CONTAINER
 cd /local_data/ingus/nemo_test/NeMo_TildeOpen/monkey_patches
 ./replace.sh
 ```
@@ -38,15 +37,16 @@ cd /local_data/ingus/nemo_test/NeMo_TildeOpen/monkey_patches
 The `monkey_patches/gpt_datset.py` file's loss masking and eod token index is hardcoded in the ltor function to correspond to TildeOpen30B.
 If training a different model, make sure to modify the loss masking and eod as your model expects.
 ### 4. Running stuff
-As long as you're inside the docker container you should be able to just run the rest of the commands. Well done.
-You have to repeat these steps every time you relaunch the docker container.
-## How to setup this NeMo fork on supercomputers?
-Disclaimer: NeMo will only work on NVIDIA GPU supercomputers. So it won't work on LUMI. (Or at least I gave up after trying to run it on LUMI for a couple days)
+Congratulations!
+As long as you're inside the docker container you should be able to just run the rest of the commands.
+You have to repeat steps 2-3 every time you relaunch the docker container.
+## How to set up NeMo on Supercomputers?
+Disclaimer: NeMo will only work on NVIDIA GPUs. So it won't work on LUMI. (Or at least I gave up after trying to run it on LUMI for a couple days)
 ### 1. Clone Nemo
 ```
 git clone https://github.com/iPRET/NeMo_TildeOpen.git
 ```
-I'll refer to `./NeMo_TileOpen/` as the "repo root".
+For the rest of the readme I'll refer to `./NeMo_TileOpen/` as the "repo root".
 ### 2. Change singularity cache folder locations
 In later commands you might run into problems with your home directory being too small to download or work with singularity containers. So change the location of the cache folders to somewhere in the project or scratch directory.
 ```
@@ -69,10 +69,10 @@ singularity build --sandbox nemo_sandbox/ nemo_25.11.sif
 ### 4. Create bind folders
 ```
 # Create folders that you'll later bind when running the container.
-# ADJUST THESE TO SUPERCOMPUTER'S FOLDER NAMES.
+# ADJUST THESE TO SUPERCOMPUTER'S FILESYSTEM FOLDER NAMES.
 # Example command is with folders used on Jupiter.
 
-mkdir -p nemo_sandbox/e nemo_sandbox/p
+mkdir nemo_sandbox/e nemo_sandbox/p
 ```
 If you won't do this, you'll later get errors that look something like:
 ```
@@ -83,7 +83,6 @@ Error:
   WARNING: By using --writable, Apptainer can't create /e destination automatically without overlay or underlay
   FATAL:   container creation failed: mount hook function failure: mount /var/lib/apptainer/mnt/session/e->/e error: while mounting /var/lib/apptainer/mnt/session/e: destination /e doesn't exist in container
 ```
-So you can just come back to this step later when you realized what you need.
 ### 5. Apply monkey patches
 ```
 # Run singularity container with bindings (-B) so repo is accessable.
@@ -92,6 +91,7 @@ So you can just come back to this step later when you realized what you need.
 singularity shell --nv --writable -B /e:/e nemo_sandbox
 
 # Apply monkey patches.
+# THIS ASSUMES YOU'RE IN THE PARENT DIRECTORY OF THE REPO ROOT.
 cd NeMo_TildeOpen/monkey_patches
 ./replace.sh
 exit
@@ -104,7 +104,7 @@ Congratulations! You now have a singularity image that you can run stuff with. Y
 ### 7. Running stuff
 #### 7.1. Lightweight scripts
 If a script it lightweight, you can probably get away with just running the script on a login node.
-To launch a singularity container on a login node, run:
+To launch a singularity container on a login node, just run:
 ```
 # ADJUST THIS TO YOUR nemo_patched.sif LOCATION
 # ADJUST FILESYSTEM BINDINGS (-B) to SUPERCOMPUTER FILESYSTEM FOLDERS
@@ -118,6 +118,7 @@ This might work for some data preprocessing scripts or conversion scripts.
 Alternatively if the script is too heavy to run on a login node, you can run an interactive slurm job:
 ```
 # ADJUST --account --partition --gres --cpus-per-task FOR YOUR SUPERCOMPTUER.
+# ADJUST --time TO HOWEVER MUCH TIME YOU NEED FOR YOUR SCRIPT.
 # ADJUST THIS TO YOUR nemo_patched.sif LOCATION
 # ADJUST FILESYSTEM BINDINGS (-B) to SUPERCOMPUTER FILESYSTEM FOLDERS
 # Example command is written to work on the JUPITER supercomputer.
@@ -134,17 +135,19 @@ srun \
   singularity shell --nv -B /e:/e nemo_patched.sif
 ```
 #### 7.3. Parallel computational heavy stuff.
-Pruning and distillation is parallelized and requires you write sbatch scripts.
+Pruning and distillation is parallelized and requires you write sbatch scripts. Examples are shown in the pruning and distillation sections.
 ## How to convert a Llama Model from HuggingFace to NeMo?
+### Note
+This version of the NeMo repo will assume your model uses YaRN for positional embeddings when converting Llama models from Huggingface to NeMo format.
 ### 1. Move outside of the NeMo repository folder if you're in it
-You have to create the convert script outside the NeMo repository folder, so that the container's envionment's NeMo is used for this.
+You have to create the convert script outside the NeMo repository folder, so that the container's envionment's NeMo is used for this. I propose parent directory of repo root.
 ### 2. Create conversion script
 Create a python script (OUTSIDE OF REPOSITORY ROOT) with contents like this:
 ```
 from nemo.collections import llm
 
-# ADJUST source TO LOCATION OF YOUR HUGGINGFACE LLAMAFORCAUSALLM CHECKPOINT
-# ADJUST output_path TO WHERE YOU WANT THE NEMO CHECKPOINT CREATED
+# ADJUST source= TO LOCATION OF YOUR HUGGINGFACE LLAMAFORCAUSALLM CHECKPOINT
+# ADJUST output_path= TO WHERE YOU WANT THE NEMO CHECKPOINT CREATED
 
 if __name__ == "__main__":
   llm.import_ckpt(
@@ -168,13 +171,13 @@ What you write inside the llm.LlamaConfig doesn't really matter. Because the con
 ### 3. Run conversion script
 After that, just run it:
 ```
-# YOU HAVE TO RUN THIS OUTSIDE THE REPO ROOT
+# YOU HAVE TO RUN THIS OUTSIDE THE REPO ROOT.
 # ON LOCAL INFRASTRUCTURE RUN THIS INSIDE DOCKER CONTAINER.
-# ON SUPERCOMPUTERS TO RUN SEE 7.2 Computationally heavy scripts
+# ON SUPERCOMPUTERS TO RUN SEE 7.2 Computationally heavy scripts.
 
 python convert.py
 ```
-If all goes successfully, you sould see something like this:
+If all goes successfully, you should see something like this:
 ```
 ...
   [NeMo I 2026-04-08 09:52:02 nemo_logging:393] Successfully saved checkpoint from iteration       0 to TLM64KNeMo
@@ -200,11 +203,11 @@ If all goes successfully, you sould see something like this:
       └── metadata.json
 ```
 #### ### 4. Potential Problems
-- The `if __name__ == "__main__":` part of the convert script is mandatory.
+- The `if __name__ == "__main__":` part of the convert script is mandatory because NeMo is cursed.
 
 - If you see an error like this:
 `ValueError: torch_dtype is not of type str/torch.dtype`
-You have to rename your `dtype` to `torch_dtype` in your HuggingFace model's config.json
+You have to rename your `dtype` to `torch_dtype` in your HuggingFace model's config.json (or the other way around).
 
 - If you applied my monkey patches, then you cannot convert models that use RoPE positional embeddings, the model has to use YaRN.
 
@@ -212,10 +215,10 @@ You have to rename your `dtype` to `torch_dtype` in your HuggingFace model's con
 ## How do I Tokenize New Data?
 You have to run this command from inside the NeMo repo folder. So that you'd use the files from this repository not the NeMo installed in the docker container.
 ```
-# YOU HAVE TO RUN THIS FROM THE NEMO REPO ROOT.
 # ON LOCAL INFRASTRUCTURE RUN THIS INSIDE DOCKER CONTAINER.
 # ON SUPERCOMPUTERS TO RUN SEE 7.2 Computationally heavy scripts. 
 #   Though you might get away with 7.1 Lightweight scripts for small datasets.
+# YOU HAVE TO RUN THIS FROM THE NEMO REPO ROOT.
 # ADJUST --input --output-prefix and --tokenizer-model TO YOUR STUFF.
 
 python scripts/nlp_language_modeling/preprocess_data_for_megatron.py \
@@ -273,7 +276,7 @@ python picklenp_2_nemo.py \
 ```
 `--output-prefix` is the file path without the .bin/.idx that NeMo adds to the end of datasets.
 ## Note on Shuffling NeMo Datasets
-When running `gpt_train.py` the validation set is chosen by taking samples from the end of your provided `.idx/.bin` file, meanwhile the training data is taken from the beginning of that file. This can lead to biased validation numbers if your data was not shuffled before tokenization. So you probably want to shuffle your data at some point.
+When running `gpt_train.py` the validation set is chosen by taking samples from the end of your provided `.idx/.bin` file. This can lead to biased validation numbers if your data was not shuffled before tokenization. So you probably want to shuffle your data at some point.
 ## How do I Prune a Model (Local Infrastructure)
 ```
 # COMMANDS MUST BE RUN INSIDE DOCKER CONTAINER.
@@ -282,8 +285,7 @@ When running `gpt_train.py` the validation set is chosen by taking samples from 
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 # COMMAND MUST BE RUN OUTSIDE REPO ROOT.
-# ADJUST --nproc_per_node, --devices, --pp_size TO NUMBER OF GPUS.
-# ADJUST ALL THE OTHER PARAMETERS TOO. PARAMETER MEANINGS AFTER THIS SCRIPT.
+# ADJUST LIKE ALL THE OTHER PARAMETERS. PARAMETER MEANINGS AFTER THIS SCRIPT.
 torchrun --nproc_per_node 4 NeMo_TildeOpen/scripts/llm/gpt_prune.py \
   --devices 4 \
   --tp_size 1 \
@@ -298,6 +300,10 @@ torchrun --nproc_per_node 4 NeMo_TildeOpen/scripts/llm/gpt_prune.py \
   --target_ffn_hidden_size 14336 \
   --target_hidden_size 4096
 ```
+`--nproc_per_node` - Number of processes torchrun will launch. Should probably equal your number of gpus.
+`--devices` - Number of GPUs per node. In this case just your number of GPUs.
+`--pp_size` - Pipeline parallelism degree. You probably just want to set this to number of GPUs.
+
 `--tp_size` - Tensor parallelism. It doesn't work for pruning as far as I know, and has to be 1.
 
 `--restore_path` - Location of source model that you wish to prune.
@@ -308,15 +314,15 @@ torchrun --nproc_per_node 4 NeMo_TildeOpen/scripts/llm/gpt_prune.py \
 
 `--num_train_samples` - Number of samples, not number of batches/train steps.
 
-`--num_layers_in_last_pipeline_stage` You can choose how many layers are in the last pipeline stage. You had to do some poking around here because of some divisibility issues.
+`--num_layers_in_last_pipeline_stage` You can choose how many layers are in the last pipeline stage. You might have to do some poking around here because of some divisibility issues or VRAM capacity issues.
 
-`--target_ffn_head_size --target_hidden_size --target_num_attention_heads --target_query_groups --target_num_layers` These parameters decide what shape the pruned model will be. I might be wrong but I think the `--target_query_groups` one didn't work.
+`--target_ffn_head_size --target_hidden_size --target_num_attention_heads --target_query_groups --target_num_layers` These parameters decide what shape the pruned model will be. If I remember correctly, the `--target_query_groups` one didn't work.
 # How do I Prune a Model? (Supercomputer)
 The scripts we used for doing pruning on JUPITER are available under `prod_scripts/`. 
-I'll follow the prune_real_xxx_optimal.sh scripts as an example. They were used to perform the 30B->15B pruning on JUPITER.
+I'll follow the prune_real_\*\_optimal.sh scripts as an example. They were used to perform the 30B->15B pruning on JUPITER.
 The example scripts are written to work from the parent directory of the repo root.
 ## 1. Write an sbatch script
-contents of `prod_scripts/prune_real_sbatchscript_optimal.sh`
+Contents of `prod_scripts/prune_real_sbatchscript_optimal.sh`
 ```
 #!/bin/bash
 #SBATCH --account=jureap133 \
@@ -329,27 +335,28 @@ contents of `prod_scripts/prune_real_sbatchscript_optimal.sh`
 #SBATCH --mem=0 \
 
 # ADJUST --account TO YOUR PROJECT NAME.
-# ADJUST --partition TO WHATEVER PARTITION YOU HAVE TO USE ON THE SUPERCOMPUTER.
+# ADJUST --partition TO ONE OF YOUR SUPERCOMPUTER'S SPECIFIC PARTITION NAMES.
 # ADJUST --gres TO WHATEVER GPUS YOUR SUPERCOMPUTER HAS IN A NODE.
-# ADJUST --cpus-per-task TO HOWEVER MANY CPUS GPU NODES ON YOUR SUPERCOMPUTER HAVE.
+# ADJUST --cpus-per-task TO HOWEVER MANY CPUs GPU-NODES ON YOUR SUPERCOMPUTER HAVE.
 # ADJUST --time TO HOW LONG YOU THINK THE PRUNING WILL TAKE.
 
 srun prune_real_singularityscript_optimal.sh
 ```
 This script just tells slurm the computing resources necessary for the job and launches `prune_real_singularity_optimal.sh` once per node when the resources are allocated.
 ## 2. Write singularity script
-contents of `prod_scripts/prune_real_singularityscript_optimal.sh`
+Contents of `prod_scripts/prune_real_singularityscript_optimal.sh`
 ```
 #!/bin/bash
 
 # ADJUST TO YOUR SINGULARITY CONTAINER LOCATION.
 # ADJUST -B BINDINGS TO YOUR SUPERCOMPUTERS FILESYSTEM BINDINGS.
 
-singularity exec --nv -B /e:/e nemo_tildeopen_3.sif ./prune_real_innerscript_optimal.sh
+singularity exec --nv -B /e:/e nemo_patched.sif ./prune_real_innerscript_optimal.sh
 ```
 The script just launches the next script inside a singularity container. My and your brain would probably start to hurt if this was not a separate script.
 ## 3. Write script to be run in containers
-contents of `prod_scripts/prune_real_innerscript_optimal.sh`
+Contents of `prod_scripts/prune_real_innerscript_optimal.sh`
+This script contains the actual pruning configuration.
 ```
 #!/bin/bash
 
@@ -362,8 +369,7 @@ export TRITON_CACHE_DIR=/e/project1/jureap133/ingus/nemo/triton_cache
 export TORCH_HOME=/e/project1/jureap133/ingus/nemo/torch_cache
 export TORCH_EXTENSIONS_DIR=/e/project1/jureap133/ingus/nemo/torch_extensions
 
-# ADJUST --nproc_per_node, --devices, --pp_size TO NUMBER OF GPUS.
-# ADJUST ALL THE OTHER PARAMETERS TOO. PARAMETER MEANINGS AFTER THIS SCRIPT.
+# ADJUST LIKE ALL THE PARAMETERS. PARAMETER MEANINGS AFTER THIS SCRIPT.
 torchrun --nproc_per_node 4 NeMo_TildeOpen/scripts/llm/gpt_prune.py \
   --devices 4 \
   --tp_size 1 \
@@ -378,6 +384,10 @@ torchrun --nproc_per_node 4 NeMo_TildeOpen/scripts/llm/gpt_prune.py \
   --target_ffn_hidden_size 14336 \
   --target_hidden_size 4096
 ```
+`--nproc_per_node` - Number of processes torchrun will launch. Should probably equal your number of gpus.
+`--devices` - Number of GPUs per node. In this case just your number of GPUs.
+`--pp_size` - Pipeline parallelism degree. You probably just want to set this to number of GPUs.
+
 `--tp_size` - Tensor parallelism. It doesn't work for pruning as far as I know, and has to be 1.
 
 `--restore_path` - Location of source model that you wish to prune.
@@ -399,15 +409,15 @@ sbatch prune_real_sbatchcript_optimal.sh
 ```
 # RUN THIS INSIDE THE DOCKER CONTAINER.
 
+# ADJUST TO GPUS YOU WANT TO USE FOR DISTILATION.
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 # ADJUST PRETTY MUCH ALL COMMAND ARGUMENTS.
 # You can see nonobvious argument explanations bellow in the (Supercomputer) section.
-
 torchrun --nproc_per_node 4 \
     NeMo_TildeOpen/scripts/llm/gpt_train.py \
       --devices 4 \
-      --num_nodes 256 \
+      --num_nodes 1 \
       --tp_size 4 \
       --pp_size 1 \
       --model_path TLM64K_Real_15B_Optimal \
@@ -424,7 +434,7 @@ torchrun --nproc_per_node 4 \
       --clip_grad 0.4 \
       --seq_length 65536 \
       --legacy_ckpt \
-      --log_dir "/e/scratch/jureap133/ingus/Distil_Real" \
+      --log_dir "/local_data/ingus/Distil_Real" \
       --name "Optimal_v3" \
       --log_interval 1 \
       --val_check_interval 64 \
@@ -435,10 +445,10 @@ torchrun --nproc_per_node 4 \
       --data_paths ./ext_nemo/ext
 ```
 # How do I Distill a Model? (Supercomputer)
-I'll follow the distil_real_xxx_optimal.sh scripts as an example. They were used to perform the 30B->15B pruning on JUPITER.
+I'll follow the distil_real_\*\_optimal.sh scripts as an example. They were used to perform our best 30B->15B distil on JUPITER.
 The example scripts are written to work from the parent directory of the repo root.
 ## 1. Write sbatch script
-contents of `prod_scripts/distil_real_sbatchscript_optimal.sh`
+Contents of `prod_scripts/distil_real_sbatchscript_optimal.sh`
 ```
 #!/bin/bash
 #SBATCH --account=jureap133 \
@@ -454,7 +464,8 @@ contents of `prod_scripts/distil_real_sbatchscript_optimal.sh`
 # ADJUST --partition TO WHATEVER PARTITION YOU HAVE TO USE ON THE SUPERCOMPUTER.
 # ADJUST --gres TO WHATEVER GPUS YOUR SUPERCOMPUTER HAS IN A NODE.
 # ADJUST --cpus-per-task TO HOWEVER MANY CPUS GPU NODES ON YOUR SUPERCOMPUTER HAVE.
-# ADJUST --time TO HOW LONG YOU THINK THE PRUNING WILL TAKE.
+# ADJUST --time TO HOW LONG YOU THINK THE DISTILATION WILL TAKE.
+
 
 export MASTER_ADDR=$(scontrol show hostname $SLURM_NODELIST | head -n1)
 export MASTER_PORT=29500
@@ -469,24 +480,24 @@ scontrol show hostname $SLURM_NODELIST > nodelist_$SLURM_JOB_ID.txt
 srun distil_real_singularityscript_optimal.sh
 ```
 ## 2. Write a singularity script
-contents of `prod_scripts/distil_real_singularityscript_optimal.sh`
+Contents of `prod_scripts/distil_real_singularityscript_optimal.sh`
 ```
 #!/bin/bash
 
 # ADJUST TO YOUR SINGULARITY CONTAINER LOCATION.
 # ADJUST -B BINDINGS TO YOUR SUPERCOMPUTERS FILESYSTEM BINDINGS.
 
-singularity exec --nv -B /e:/e nemo_tildeopen_3.sif ./distil_real_innerscript_optimal.sh
+singularity exec --nv -B /e:/e nemo_patched.sif ./distil_real_innerscript_optimal.sh
 ```
 ## 3. Write script to be run in containers
-contents of `prod_scripts/distil_real_innerscript_optimal.sh`
+Contents of `prod_scripts/distil_real_innerscript_optimal.sh`
 ```
 #!/bin/bash
 
-# This is a magic line that help with VRAM on JUPITER. 
+# This is a magic line that helps with VRAM on JUPITER. 
 export NCCL_BUFFSIZE=2097152
 
-# ADJUST THESE TO LOCATIONS ON YOUR SCRATCH FOLDER.
+# ADJUST THESE LOCATIONS TO YOUR SCRATCH FOLDER.
 # These exports are necessary so your home folder doesn't overflow.
 export HF_HUB_CACHE=/e/project1/jureap133/ingus/nemo/hf_cache
 export HF_HUB_OFFLINE=1
@@ -495,7 +506,7 @@ export TRITON_CACHE_DIR=/e/project1/jureap133/ingus/nemo/triton_cache
 export TORCH_HOME=/e/project1/jureap133/ingus/nemo/torch_cache
 export TORCH_EXTENSIONS_DIR=/e/project1/jureap133/ingus/nemo/torch_extensions/$SLURM_JOB_ID
 
-# ADJUST PRETTY MUCH ALL OF THE PARAMETERS BELLOW. EXPLANATIONS FOR TRICKY ONES AFTER THIS CODE BLOCK.
+# ADJUST PRETTY MUCH ALL OF THE PARAMETERS BELLOW. THERE ARE EXPLANATIONS FOR NONOBVIOUS ONES AFTER THIS CODE BLOCK.
 
 torchrun \
   --nnodes 256 \
@@ -533,10 +544,9 @@ torchrun \
       --data_paths ./ext_nemo/ext
 ```
 `--nproc_per_node` - Number of GPUs per node.
-
 `--devices` - Number of GPUs per node.
 
-`--tp_size` - Tensor parallelism. Does actually work during distillation.
+`--tp_size` - Tensor parallelism. It does actually work during distillation.
 
 `--pp_size` - Pipeline parallelism.
 
@@ -550,7 +560,7 @@ torchrun \
 
 `--gbs` - Global batch size.
 
-`--legacy_ckpt` - Necessary if you get errors that look like `[rank0]: RuntimeError: Missing key in checkpoint state_dict: module.decoder.final_layernorm._extra_state/shard_0_1.`
+`--legacy_ckpt` - Magic. Necessary if you get errors that look like `[rank0]: RuntimeError: Missing key in checkpoint state_dict: module.decoder.final_layernorm._extra_state/shard_0_1.`
 
 `--log_dir` and `--name` - Checkpoints, TensorBoard logs and other random stuff that NeMo logs will be saved under the path `--log_dir/--name/`
 
@@ -558,9 +568,9 @@ torchrun \
 
 `--limit_val_batches` - Number of batches done for validation.
 
-`--save_tok_k` - If this is set to -1, then it will save all checkpoints. If it's an integer, then saves top k checkpoints by validation loss and autodeletes ones that have less. I remember this was buggy.
+`--save_top_k` - If this is set to -1, then it will save all checkpoints. If it's an integer, then saves top k checkpoints by validation loss and autodeletes ones that have less. I get a feeling like this arg was buggy so I wrote a script that automatically backs up the most recent checkpoint.
 
-`--sync_checkpoitns` - Flag that makes NeMo do synchronous checkpointing rather than asynchronous checkpointing. There's a tradeoff that async checkpoints had some bug I don't remember, but it was serious enough that I switched to sync checkpoints. Meanwhile sync checkpoints had a bug where they don't save model config.
+`--sync_checkpoitns` - Flag that makes NeMo do synchronous checkpointing rather than asynchronous checkpointing. There's a tradeoff that async checkpoints had some bug I don't remember, but it was serious enough that I switched to sync checkpoints. Meanwhile sync checkpoints had a bug where they don't save model configs.
 
 `--max_checkpoints` - Training exists after making this many checkpoints.
 
@@ -572,7 +582,7 @@ sbatch distil_real_sbatchscript_optimal.sh
 # How do You convert NeMo Llama Model to HuggingFace?
 ## 1. Create Convert Script
 You have to create the convert script outside the NeMo repository folder, so that the container's envionment's NeMo is used for this.
-Create a convert `convert_nemo_hf.py` script by analogy with this and run it: 
+Create a `convert_nemo_hf.py` script by analogy with this: 
 ```
 if __name__ == "__main__":
   from nemo.collections import llm
@@ -593,7 +603,7 @@ if __name__ == "__main__":
 
 python convert_nemo_hf.py
 ```
-### Note
+### 2.1 Possible Conversion Pitfalls
 You might run into conversion issues, because when training with synchronous checkpointing it doesn't save the model config in the checkpoints. 
 I don't remember precisely but I think to fix was to copy `model.yaml` and `io.json` from pruned student model to the analogous checkpoint location.
 ## 3. Adjust YaRN Settings.
