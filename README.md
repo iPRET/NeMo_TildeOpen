@@ -10,7 +10,7 @@ Pro tips:
 ```
 git clone https://github.com/iPRET/NeMo_TildeOpen.git
 ```
-In the rest of the readme I'll refer to `NeMo_TileOpen/` as the "repo root".
+In the rest of the readme I'll refer to `NeMo_TildeOpen/` as the "repo root".
 ### 2. Launch the NeMo Container
 ```
 # ADJUST BINDINGS -v TO CONTAIN YOUR NEMO REPO.
@@ -34,7 +34,7 @@ cd /local_data/ingus/nemo_test/NeMo_TildeOpen/monkey_patches
 ./replace.sh
 ```
 #### Note on masking and eod tokens.
-The `monkey_patches/gpt_datset.py` file's loss masking and eod token index is hardcoded in the ltor function to correspond to TildeOpen30B.
+The `monkey_patches/gpt_dataset.py` file's loss masking and eod token index is hardcoded in the ltor function to correspond to TildeOpen30B.
 If training a different model, make sure to modify the loss masking and eod as your model expects.
 ### 4. Running stuff
 Congratulations!
@@ -46,7 +46,7 @@ Disclaimer: NeMo will only work on NVIDIA GPUs. So it won't work on LUMI. (Or at
 ```
 git clone https://github.com/iPRET/NeMo_TildeOpen.git
 ```
-For the rest of the readme I'll refer to `./NeMo_TileOpen/` as the "repo root".
+For the rest of the readme I'll refer to `./NeMo_TildeOpen/` as the "repo root".
 ### 2. Change singularity cache folder locations
 In later commands you might run into problems with your home directory being too small to download or work with singularity containers. So change the location of the cache folders to somewhere in the project or scratch directory.
 ```
@@ -98,7 +98,7 @@ exit
 ```
 ### 6. Rebuild container into a .sif file
 ```
-singularity build nemo_patched.sif
+singularity build nemo_patched.sif nemo_sandbox/
 ```
 Congratulations! You now have a singularity image that you can run stuff with. You will never have to repeat the last 6 steps again.
 ### 7. Running stuff
@@ -202,7 +202,7 @@ If all goes successfully, you should see something like this:
       ├── common.pt
       └── metadata.json
 ```
-#### ### 4. Potential Problems
+### 4. Potential Problems
 - The `if __name__ == "__main__":` part of the convert script is mandatory because NeMo is cursed.
 
 - If you see an error like this:
@@ -316,7 +316,7 @@ torchrun --nproc_per_node 4 NeMo_TildeOpen/scripts/llm/gpt_prune.py \
 
 `--num_layers_in_last_pipeline_stage` You can choose how many layers are in the last pipeline stage. You might have to do some poking around here because of some divisibility issues or VRAM capacity issues.
 
-`--target_ffn_head_size --target_hidden_size --target_num_attention_heads --target_query_groups --target_num_layers` These parameters decide what shape the pruned model will be. If I remember correctly, the `--target_query_groups` one didn't work.
+`--target_ffn_hidden_size --target_hidden_size --target_num_attention_heads --target_num_query_groups --target_num_layers` These parameters decide what shape the pruned model will be. If I remember correctly, the `--target_num_query_groups` one didn't work.
 # How do I Prune a Model? (Supercomputer)
 The scripts we used for doing pruning on JUPITER are available under `prod_scripts/`. 
 I'll follow the prune_real_\*\_optimal.sh scripts as an example. They were used to perform the 30B->15B pruning on JUPITER.
@@ -325,14 +325,14 @@ The example scripts are written to work from the parent directory of the repo ro
 Contents of `prod_scripts/prune_real_sbatchscript_optimal.sh`
 ```
 #!/bin/bash
-#SBATCH --account=jureap133 \
-#SBATCH --partition=booster \
-#SBATCH --nodes=1 \
-#SBATCH --ntasks-per-node=1 \
-#SBATCH --gres=gpu:4 \
-#SBATCH --cpus-per-task=244 \
-#SBATCH --time=8:30:00 \
-#SBATCH --mem=0 \
+#SBATCH --account=jureap133
+#SBATCH --partition=booster
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:4
+#SBATCH --cpus-per-task=244
+#SBATCH --time=8:30:00
+#SBATCH --mem=0
 
 # ADJUST --account TO YOUR PROJECT NAME.
 # ADJUST --partition TO ONE OF YOUR SUPERCOMPUTER'S SPECIFIC PARTITION NAMES.
@@ -342,7 +342,7 @@ Contents of `prod_scripts/prune_real_sbatchscript_optimal.sh`
 
 srun prune_real_singularityscript_optimal.sh
 ```
-This script just tells slurm the computing resources necessary for the job and launches `prune_real_singularity_optimal.sh` once per node when the resources are allocated.
+This script just tells slurm the computing resources necessary for the job and launches `prune_real_singularityscript_optimal.sh` once per node when the resources are allocated.
 ## 2. Write singularity script
 Contents of `prod_scripts/prune_real_singularityscript_optimal.sh`
 ```
@@ -400,10 +400,10 @@ torchrun --nproc_per_node 4 NeMo_TildeOpen/scripts/llm/gpt_prune.py \
 
 `--num_layers_in_last_pipeline_stage` You can choose how many layers are in the last pipeline stage. You had to do some poking around here because of some divisibility issues.
 
-`--target_ffn_head_size --target_hidden_size --target_num_attention_heads --target_query_groups --target_num_layers` These parameters decide what shape the pruned model will be. I might be wrong but I think the `--target_query_groups` one didn't work.
+`--target_ffn_hidden_size --target_hidden_size --target_num_attention_heads --target_num_query_groups --target_num_layers` These parameters decide what shape the pruned model will be. I might be wrong but I think the `--target_num_query_groups` one didn't work.
 ## 4. Run it
 ```
-sbatch prune_real_sbatchcript_optimal.sh
+sbatch prune_real_sbatchscript_optimal.sh
 ```
 # How do I Distil a Model? (Local Infrastructure)
 ```
@@ -451,14 +451,14 @@ The example scripts are written to work from the parent directory of the repo ro
 Contents of `prod_scripts/distil_real_sbatchscript_optimal.sh`
 ```
 #!/bin/bash
-#SBATCH --account=jureap133 \
-#SBATCH --partition=booster \
-#SBATCH --nodes=256 \
-#SBATCH --ntasks-per-node=1 \
-#SBATCH --gres=gpu:4 \
-#SBATCH --cpus-per-task=288 \
-#SBATCH --time=3:00:00 \
-#SBATCH --mem=0 \
+#SBATCH --account=jureap133
+#SBATCH --partition=booster
+#SBATCH --nodes=256
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:4
+#SBATCH --cpus-per-task=288
+#SBATCH --time=3:00:00
+#SBATCH --mem=0
 
 # ADJUST --account TO YOUR PROJECT NAME.
 # ADJUST --partition TO WHATEVER PARTITION YOU HAVE TO USE ON THE SUPERCOMPUTER.
@@ -570,15 +570,25 @@ torchrun \
 
 `--save_top_k` - If this is set to -1, then it will save all checkpoints. If it's an integer, then saves top k checkpoints by validation loss and autodeletes ones that have less. I get a feeling like this arg was buggy so I wrote a script that automatically backs up the most recent checkpoint.
 
-`--sync_checkpoitns` - Flag that makes NeMo do synchronous checkpointing rather than asynchronous checkpointing. There's a tradeoff that async checkpoints had some bug I don't remember, but it was serious enough that I switched to sync checkpoints. Meanwhile sync checkpoints had a bug where they don't save model configs.
+`--sync_checkpoints` - Flag that makes NeMo do synchronous checkpointing rather than asynchronous checkpointing. There's a tradeoff that async checkpoints had some bug I don't remember, but it was serious enough that I switched to sync checkpoints. Meanwhile sync checkpoints had a bug where they don't save model configs.
 
-`--max_checkpoints` - Training exists after making this many checkpoints.
+`--max_checkpoints` - Training exits after making this many checkpoints.
 
 `--data_paths` - Path to training data `.idx/.bin`/.
 ## 4. Run it.
 ```
 sbatch distil_real_sbatchscript_optimal.sh
 ```
+## 5. Keep it running (job chaining)
+Supercomputers cap the walltime of a single job (on JUPITER booster we ran with 3h jobs), which is way shorter than a full distillation (~5 days). Training automatically resumes from the newest `*-last` checkpoint in `--log_dir/--name/checkpoints/`, so you just submit the same sbatch script many times as a dependency chain:
+```
+# Each job starts only after the previous one ends (finished, timed out or crashed).
+job=$(sbatch --parsable distil_real_sbatchscript_optimal.sh)
+for i in $(seq 1 40); do
+  job=$(sbatch --parsable --dependency=afterany:$job distil_real_sbatchscript_optimal.sh)
+done
+```
+Set `--max_checkpoints` so the training exits cleanly a bit before the walltime kills it (checkpoint count * `--val_check_interval` * seconds-per-step should stay comfortably under the job's `--time`).
 # How do You convert NeMo Llama Model to HuggingFace?
 ## 1. Create Convert Script
 You have to create the convert script outside the NeMo repository folder, so that the container's envionment's NeMo is used for this.
@@ -594,8 +604,8 @@ if __name__ == "__main__":
     overwrite=True
   )
 ```
-`--path` - Path to NeMo checkpoint.
-`--output_path` - Path where huggingface checkpoint will be generated.
+`path` - Path to NeMo checkpoint.
+`output_path` - Path where huggingface checkpoint will be generated.
 ## 2. Run Convert Script
 ```
 # RUN THIS INSIDE DOCKER CONTAINER IF ON LOCAL INFRASTRUCTURE.
