@@ -11,7 +11,7 @@ Pro tips:
 ```
 git clone https://github.com/iPRET/NeMo_TildeOpen.git
 ```
-In the rest of the readme I'll refer to `NeMo_TildeOpen/` as the "repo root".
+In the rest of the readme I'll refer to `NeMo_TildeOpen/` as the "repo root". And I'll refer to `NeMo_TildeOpen/../` as the "parent directory of the repo root". When you run stuff in the repo root, it runs scripts from the repository you're currently looking at. And when you run stuff from the parent directory, it runs nemo scripts installed in the nemo container (these two NeMos are different).
 ### 2. Launch the NeMo Container
 ```
 # ADJUST BINDINGS -v TO CONTAIN YOUR NEMO REPO.
@@ -30,7 +30,7 @@ Use the `nemo:25.11` container and ONLY 25.11. Older and newer containers have d
 ### 3. Apply monkey patches
 Once inside the container apply the monkey patches.
 ```
-# ADJUST THIS WITH YOU NEMO PATH
+# ADJUST THIS WITH WHERE THE CLONER NEMO REPO IS
 # RUN THIS INSIDE THE DOCKER CONTAINER
 cd /local_data/ingus/nemo_test/NeMo_TildeOpen/monkey_patches
 ./replace.sh
@@ -48,7 +48,7 @@ Disclaimer: NeMo will only work on NVIDIA GPUs. So it won't work on LUMI. (Or at
 ```
 git clone https://github.com/iPRET/NeMo_TildeOpen.git
 ```
-For the rest of the readme I'll refer to `./NeMo_TildeOpen/` as the "repo root".
+In the rest of the readme I'll refer to `NeMo_TildeOpen/` as the "repo root". And I'll refer to `NeMo_TildeOpen/../` as the "parent directory of the repo root". When you run stuff in the repo root, it runs scripts from the repository you're currently looking at. And when you run stuff from the parent directory, it runs nemo scripts installed in the nemo container (these two NeMos are different).
 ### 2. Change singularity cache folder locations
 In later commands you might run into problems with your home directory being too small to download or work with singularity containers. So change the location of the cache folders to somewhere in the project or scratch directory.
 ```
@@ -163,7 +163,7 @@ These paths have to match the `HF_HUB_CACHE` and `TORCH_HOME` exports in your in
 ### Note
 This version of the NeMo repo will assume your model uses YaRN for positional embeddings when converting Llama models from Huggingface to NeMo format.
 ### 1. Move outside of the NeMo repository folder if you're in it
-You have to create the convert script outside the NeMo repository folder, so that the container's envionment's NeMo is used for this. I propose parent directory of repo root.
+You have to create the convert script outside the NeMo repository root (e.g. parent directory of repo root), so that the container's envionment's NeMo is used for this.
 ### 2. Create conversion script
 Create a python script in parent directory of repo root with contents like this:
 ```
@@ -194,7 +194,7 @@ What you write inside the llm.LlamaConfig doesn't really matter. Because the con
 ### 3. Run conversion script
 After that, just run it:
 ```
-# YOU HAVE TO RUN THIS OUTSIDE THE REPO ROOT.
+# YOU HAVE TO RUN THIS IN THE PARENT DIRECTORY OF THE REPO ROOT.
 # ON LOCAL INFRASTRUCTURE RUN THIS INSIDE DOCKER CONTAINER.
 # ON SUPERCOMPUTERS TO RUN SEE 7.2 Computationally heavy scripts.
 
@@ -238,7 +238,7 @@ You have to rename your `dtype` to `torch_dtype` in your HuggingFace model's con
 
 # How do I get Data?
 ## How do I Tokenize New Data?
-You have to run this command from inside the NeMo repo folder. So that you'd use the files from this repository not the NeMo installed in the docker container.
+You have to run this command from inside the NeMo repo root. So that you'd use the files from this repository not the NeMo installed in the docker container.
 ```
 # ON LOCAL INFRASTRUCTURE RUN THIS INSIDE DOCKER CONTAINER.
 # ON SUPERCOMPUTERS TO RUN SEE 7.2 Computationally heavy scripts. 
@@ -263,7 +263,7 @@ python scripts/nlp_language_modeling/preprocess_data_for_megatron.py \
 `--tilde-open-eod` is a flag that overrides the EOD to be 48 as in TildeOpen30B.
 ## How do I Convert Old GPT NeoX Data to NeMo Format?
 I wrote two scripts:
-- One script `tilde-nlp/llm-gpt-neox/tools/datasets/geox_2_picklenp.py` (different repo) for converting GPT NeoX datasets to pickle files
+- One script `tilde-nlp/llm-gpt-neox/tools/datasets/geox_2_picklenp.py` (this is a different repo) for converting GPT NeoX datasets to pickle files
 - The other script NeMo_TildeOpen/picklenp_2_nemo.py for converting from those pickle files to NeMo datasets.
 ### 1. Convert data from GPT NeoX format to intermediate format
 Launch environment that can run GPT NeoX stuff.
@@ -310,7 +310,7 @@ On the pleasant side, unlike GPT NeoX, NeMo does not resample the validation set
 # ADJUST TO GPUS YOU WANT TO USE.
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 
-# COMMAND MUST BE RUN OUTSIDE REPO ROOT.
+# COMMAND MUST BE RUN OUTSIDE REPO ROOT (E.G. PARENT DIRECTORY OF REPO ROOT).
 # ADJUST LIKE ALL THE OTHER PARAMETERS. PARAMETER MEANINGS AFTER THIS SCRIPT.
 torchrun --nproc_per_node 4 NeMo_TildeOpen/scripts/llm/gpt_prune.py \
   --devices 4 \
@@ -607,7 +607,7 @@ Sidenote on validation: it can OOM even when training itself fits, because the v
 
 `--save_top_k` - If this is set to -1, then it will save all checkpoints. If it's an integer, then saves top k checkpoints by validation loss and autodeletes ones that have less. I get a feeling like this arg was buggy so I wrote a script that automatically backs up the most recent checkpoint.
 
-`--sync_checkpoints` - Flag that makes NeMo do synchronous checkpointing rather than asynchronous checkpointing. With the default async checkpointing, resumed runs would restart with an exploded loss (the optimizer state gets lost/corrupted on resume), and jobs sometimes died with `ValueError: Last checkpoint is unfinished and cannot be used to resume` (if you hit that, manually delete the `*-last-unfinished`/corrupt `*-last` checkpoint folder). Sync checkpointing fixed resuming. The tradeoff: sync checkpoints don't save the model config (`context/model.yaml` and `context/io.json`) - see the conversion pitfalls section below for the fix.
+`--sync_checkpoints` - Flag that makes NeMo do synchronous checkpointing rather than asynchronous checkpointing. With the default async checkpointing, resumed runs would restart with an exploded loss (the optimizer state gets lost/corrupted on resume), and jobs sometimes died with `ValueError: Last checkpoint is unfinished and cannot be used to resume` (if you hit that, manually delete the `*-last-unfinished`/corrupt `*-last` checkpoint folder). Sync checkpointing fixed resuming. The tradeoff: sync checkpoints have problems with saving model configs.
 
 `--max_checkpoints` - Training exits after making this many checkpoints.
 Set `--max_checkpoints` so the training exits cleanly a bit before the walltime kills it (checkpoint count * `--val_check_interval` * seconds-per-step should stay comfortably under the job's `--time`).
@@ -633,7 +633,7 @@ done
 NeMo resumes from whatever checkpoint folder in `--log_dir/--name/checkpoints/` ends with `-last`. So to restart from an earlier checkpoint: rename the current `*-last` folder to something else, and rename your desired checkpoint's folder so it ends with `-last`. The iteration number is somehow inferred from the `-last` checkpoint.
 # How do You convert NeMo Llama Model to HuggingFace?
 ## 1. Create Convert Script
-You have to create the convert script outside the NeMo repository folder, so that the container's envionment's NeMo is used for this.
+You have to create the convert script outside the NeMo repository root, so that the container's envionment's NeMo is used for this.
 Create a `convert_nemo_hf.py` script by analogy with this: 
 ```
 if __name__ == "__main__":
@@ -656,7 +656,7 @@ if __name__ == "__main__":
 python convert_nemo_hf.py
 ```
 ### 2.1 Possible Conversion Pitfalls
-- When training with synchronous checkpointing (`--sync_checkpoints`) the model config is not saved in the checkpoints. Symptom: conversion crashes with `json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)`. Fix: copy `context/model.yaml` and `context/io.json` from any early checkpoint of the same run (or from the pruned student model) into the checkpoint you're converting. (I don't remember this 100%, but I have a strong suspicion `io.json` is the file that's actually read and `model.yaml` is ignored - copy both to be safe.)
+- When training with synchronous checkpointing (`--sync_checkpoints`) the model config is not saved in the checkpoints or the config is corrupted. Symptom: conversion crashes with `json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)`. Fix: copy `context/model.yaml` and `context/io.json` from the pruned student model into the checkpoint you're converting.
 
 - A pruned-but-untrained checkpoint won't convert at all - you get `RuntimeError: Missing key in checkpoint state_dict: ...._extra_state...`, and the export API has no `--legacy_ckpt` to bail you out. The trickery that works: "train" the pruned model for one step with zero learning rate and convert the checkpoint that produces:
 ```
